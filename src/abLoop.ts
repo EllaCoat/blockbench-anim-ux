@@ -10,8 +10,10 @@
 //
 // 設計判断 :
 //   - 範囲はセッション内のみ (= AJ blueprint 汚染回避、 永続化したい場合は MCP 側に出す方が筋)
-//   - 監視は rAF で常時走る、 制御は filterState.abLoop + loopStart/End の null チェックで分岐
-//     (= 編集中の手動 setTime に追従されるのを防ぐため、 必ず Timeline.playing 中だけ巻き戻す)
+//   - rAF は filterState.abLoop = true の間だけ稼働 (= OFF 時は idle cost ゼロ)。
+//     toggle / shortcut で abLoop を切替えた直後に syncAbLoopWatch() を呼んで start/stop を反映する。
+//     ON 中の編集 (= Timeline.playing=false) でも rAF は回り続けるが、 tick 内で
+//     timeline.playing 判定があるため巻き戻しは発生しない (= 計算は noop で 1 frame 数 µs)。
 //   - A > B の逆向き範囲は不正扱いで巻き戻さない (= ユーザーミスを silent fail させて事故を防ぐ)
 //   - 視覚的な範囲マーカー (= timeline 縦線) は v0.2 では未実装、 v0.3 で追加検討
 
@@ -93,6 +95,14 @@ function stopWatch(): void {
 	watchHandle = undefined
 }
 
+// filterState.abLoop を見て rAF watch を start/stop する。
+// toggle (= toggles.ts) と shortcut (= 下の toggle action) の両経路から呼ばれる。
+// ON → 未稼働なら start、 OFF → 稼働中なら stop、 それ以外 (= 状態一致) は noop。
+export function syncAbLoopWatch(): void {
+	if (filterState.abLoop) startWatch()
+	else stopWatch()
+}
+
 let actions: Array<{ delete(): void }> = []
 
 export function installAbLoop(): () => void {
@@ -138,6 +148,8 @@ export function installAbLoop(): () => void {
 				filterState.abLoop = !filterState.abLoop
 				// shortcut 経由でも filter bar の class 状態を反映 (= toggles.ts の共通関数を流用)
 				syncToggleVisuals()
+				// rAF を on/off 同期 (= toggle 経路の sync と同経路、 idle cost ゼロを維持)
+				syncAbLoopWatch()
 			},
 		})
 	)
@@ -159,7 +171,8 @@ export function installAbLoop(): () => void {
 	// MutationObserver で bar が再 inject された後の状態追従 (= 新しい span に再描画)
 	const unregisterRefresh = registerRefreshCallback(updateAbLoopStatus)
 
-	startWatch()
+	// plugin load 直後は abLoop=false なので watch は開始しない (= idle cost ゼロ)。
+	// toggle / shortcut で ON にされた時点で syncAbLoopWatch() が走って start する。
 
 	return () => {
 		unregisterRefresh()
