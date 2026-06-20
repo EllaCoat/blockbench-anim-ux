@@ -4,6 +4,7 @@
 // onlySelected = true の間だけ selectionWatch に listener を 1 本登録して applyFilter を再発火する。
 // (= 選択変化検知は selectionWatch.ts に共通化済、 現状の購読者はここのみ)
 
+import { syncAbLoopWatch } from './abLoop'
 import { applyFilter, filterState, type FilterState } from './animatorPanelUI'
 import { forceRefreshOnionSkin } from './onionSkin'
 import { addSelectionListener } from './selectionWatch'
@@ -57,6 +58,11 @@ export function installTogglesHandler(): () => void {
 		if (key === 'onionSkin') {
 			// toggle OFF 時に ghost を即消す / ON 時に即ビルドする (= 次の event 発火待ちのラグ回避)
 			forceRefreshOnionSkin()
+		}
+		if (key === 'abLoop') {
+			// abLoop ON で rAF watch 開始 / OFF で停止 (= idle cost ゼロ)。
+			// shortcut 経由 (= abLoop.ts) も自分で syncAbLoopWatch を呼ぶ二経路設計。
+			syncAbLoopWatch()
 		}
 
 		syncToggleVisuals()

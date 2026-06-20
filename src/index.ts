@@ -20,10 +20,10 @@ Plugin.register(PLUGIN_ID, {
 	title: 'Animation UX',
 	author: 'EllaCoat',
 	description:
-		'Animator panel search, filter, 3D-selection sync, keyframe-jump shortcuts, A-B loop playback, and onion skin for animating models with many bones.',
+		'Animator panel search, filter, 3D-selection sync, keyframe-jump shortcuts, A-B loop playback with timeline markers, and onion skin with adjustable range (Animation menu).',
 	icon: 'search',
 	variant: 'desktop',
-	version: '0.2.0',
+	version: '0.3.0',
 	onload() {
 		cleanups.push(installAnimatorPanelUI())
 		cleanups.push(installSearchHandler())
