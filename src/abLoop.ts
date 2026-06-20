@@ -38,10 +38,10 @@ let watchHandle: number | undefined
 // 後者は再生中等で外れる可能性 + 実機検証で shortcut 反応せず、 modes 制約のみに簡素化。
 const ACTION_CONDITION = { modes: ['animate'] }
 
-// filter bar 右端の status span (= "A:f25 B:f49") を現状で書き換える。
+// filter bar 右端の status span (= "A:0f B:20f") を現状で書き換える。
 // shortcut 経由で値が変わった瞬間に呼んで即時反映 + refresh callback でも呼んで
 // MutationObserver で bar が再 inject された後の state も追従する。
-// 表示単位は frame (= Animation.snapping で取得した fps を時刻に掛けて整数化)。
+// 表示単位は frame (= Animation.snapping で取得した fps を時刻に掛けて整数化、 後置 `f`)。
 // AJ blueprint は snapping=20、 vanilla は他値の可能性あるので動的取得。 フォールバックは 20fps。
 function getFps(): number {
 	const fps = (typeof Animation !== 'undefined' ? Animation : undefined)?.selected?.snapping
@@ -50,7 +50,7 @@ function getFps(): number {
 
 function formatTime(t: number | undefined): string {
 	if (t === undefined) return '—'
-	return `f${Math.round(t * getFps())}`
+	return `${Math.round(t * getFps())}f`
 }
 
 function updateAbLoopStatus(): void {
