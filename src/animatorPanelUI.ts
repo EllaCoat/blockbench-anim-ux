@@ -96,10 +96,10 @@ li.animator:has(.timeline_animator_name[data-anim-ux-breadcrumb]:hover),
 .timeline_animator_name[data-anim-ux-breadcrumb]:hover::after {
 	content: attr(data-anim-ux-breadcrumb);
 	position: absolute;
-	left: 100%;
+	right: 100%;
 	top: 50%;
 	transform: translateY(-50%);
-	margin-left: 12px;
+	margin-right: 12px;
 	background: var(--color-back);
 	color: var(--color-text);
 	border: 1px solid var(--color-border);
