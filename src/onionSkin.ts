@@ -353,7 +353,11 @@ function rebuildGhosts(): void {
 
 // range を変更 → 永続化 → ghost と material を全消し (= 次 rebuild で新 range の構成で作り直す)。
 // 範囲外の値は clamp、 整数化。 toggle が OFF の場合でも localStorage には保存される。
+// NaN / 非数 (= dialog の空文字確定等) は **silent 無視** (= 現値維持、 localStorage 書き換えなし)。
+// Math.floor(NaN) は NaN を返すので、 isFinite ガードを先に置かないと localStorage に "NaN" が
+// 書かれて以後ロード時に default に戻り続けることになる (= Codex review 指摘)。
 export function setOnionSkinRange(n: number): void {
+	if (!Number.isFinite(n)) return
 	const clamped = Math.max(MIN_RANGE, Math.min(MAX_RANGE, Math.floor(n)))
 	if (clamped === onionSkinRange) return
 	onionSkinRange = clamped
@@ -436,13 +440,16 @@ export function installOnionSkin(): () => void {
 	Blockbench?.on('reset_project', onModeChange)
 
 	// Animation menu に「Onion Skin Range...」 Action を追加 (= dialog 起動口)。
-	// shortcut は付けない (= 設定変更は稀、 キー衝突避ける)。 condition の modes は menu 側で animate 限定済。
+	// shortcut は付けない (= 設定変更は稀、 キー衝突避ける)。 condition で animate 限定 (= 既存
+	// shortcut action と同じ object 形式、 menu の condition が effective だが Action 単体で
+	// 呼ばれたとき (= 検索パレット等) にも筋を通す。 Codex review IMO 反映)。
 	let rangeAction: { delete(): void } | undefined
 	if (typeof Action !== 'undefined') {
 		rangeAction = new Action('anim_ux_set_onion_skin_range', {
 			name: 'Anim UX: Onion Skin Range...',
 			icon: 'layers',
 			category: 'animation',
+			condition: { modes: ['animate'] },
 			click: openOnionSkinRangeDialog,
 		})
 		const animationMenu = (typeof MenuBar !== 'undefined' ? MenuBar : undefined)?.menus?.animation
