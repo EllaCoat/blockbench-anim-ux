@@ -72,7 +72,7 @@ declare const THREE: {
 const ROOT_NAME = 'anim_ux_onion_skin_ghosts'
 const COLOR_PAST = 0x66aaff
 const COLOR_FUTURE = 0xffaa66
-const OPACITY = 0.4
+const OPACITY = 0.2
 const DEFAULT_STEP = 1 / 20 // BB の標準 = 20 fps (= AJ も同じ)
 
 let ghostRoot: unknown | undefined
@@ -139,9 +139,14 @@ function cloneSubtreeAtCurrentPose(group: NonNullable<NonNullable<typeof Group>[
 		const tmpV1 = new (THREE.Vector3 as new () => unknown)()
 		const tmpQ = new (THREE.Quaternion as new () => unknown)()
 		const tmpV2 = new (THREE.Vector3 as new () => unknown)()
-		copy.position = src.getWorldPosition(tmpV1)
-		copy.quaternion = src.getWorldQuaternion(tmpQ)
-		copy.scale = src.getWorldScale(tmpV2)
+		// Three.js の Object3D.position / quaternion / scale は内部固定の Vector3/Quaternion で、
+		// 別 instance を直接 assign すると Object3D 側の matrix 計算に反映されない (= 描画位置が更新されない)。
+		// さらに tmpV1/tmpQ/tmpV2 を past/future で使い回してるため、 直接 assign すると future build 時に
+		// past の position が future の値に上書きされる (= 両 ghost が同位置に表示される)。
+		// .copy() で「値だけ」 を内部 instance に書き込むのが正しい経路。
+		;(copy.position as { copy(v: unknown): void }).copy(src.getWorldPosition(tmpV1))
+		;(copy.quaternion as { copy(v: unknown): void }).copy(src.getWorldQuaternion(tmpQ))
+		;(copy.scale as { copy(v: unknown): void }).copy(src.getWorldScale(tmpV2))
 		;(batch as { add(c: unknown): void }).add(copy)
 	})
 	return batch
