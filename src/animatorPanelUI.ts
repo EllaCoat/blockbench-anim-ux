@@ -73,6 +73,9 @@ const CSS = `
 	width: 24px;
 	height: 24px;
 	min-width: 0;
+	/* min-width:0 で BB の min-width:100 は打ち消せるが、 副作用として flex shrink が
+	   発動して timeline 横幅が狭い時 24px 未満に潰れる可能性。 flex 固定で予防 (= Codex 後段 fix 反映)。 */
+	flex: 0 0 24px;
 	padding: 0;
 	box-shadow: none;
 	background: transparent;
