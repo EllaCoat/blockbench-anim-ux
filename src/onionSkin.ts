@@ -7,8 +7,8 @@
 // 経路 (= BB 既存 onion skin と同じ pattern、 ただし全 rig ではなく選択 Group のみ) :
 //   1. Blockbench.on('display_animation_frame') / 'update_selection' で再構築 trigger
 //   2. Timeline.time 退避 → Animator.showDefaultPose + Animator.stackAnimations で目標時刻に rig を当てる
-//   3. group.forEachChild で node を巡って node.mesh.geometry を clone + 半透明 material に置換
-//   4. ghost を Canvas.scene 直下の ghostRoot に add
+//   3. 選択 Group の subtree を走査して各 src.mesh に対応する ghost mesh を ghostMeshes Map で確保
+//   4. src の world transform を ghost に .copy() で書き戻す (= 差分更新、 毎 frame の dispose ナシ)
 //   5. Timeline.time 復元 + showDefaultPose + stackAnimations で実 rig を元に戻す
 //
 // 既存 BB onion skin (= Animator.onion_skin_object) との関係 :
@@ -20,6 +20,12 @@
 //     playing=false でも ghost が出るようにする (= 微調整中の用途を優先)
 //   - stackAnimations が無い古い BB では Animator.preview に fallback はせず silent skip
 //     (= 再帰トラップ回避が優先、 Codex 助言通り)
+//   - ghost mesh は Map<srcUuid|direction, Mesh> で永続管理 (= v0.3 で差分更新化)。
+//     v0.2 初版は毎 frame dispose + 再 clone で GC ストッターを誘発していた。 現在は :
+//       * selection / 子構成が変わった時のみ Map をクリア + ensureGhost で再生成
+//       * 通常 frame は src の world transform を ghost に .copy() するだけ (= no allocation)
+//       * material は past/future で 1 つずつ共有 (= ghost ごとに作らず dispose も不要)
+//       * matrixAutoUpdate=false + 手動 updateMatrix() で内部 matrix 計算も最小化
 
 import { filterState } from './animatorPanelUI'
 
@@ -75,34 +81,75 @@ const COLOR_FUTURE = 0xffaa66
 const OPACITY = 0.2
 const DEFAULT_STEP = 1 / 20 // BB の標準 = 20 fps (= AJ も同じ)
 
-let ghostRoot: unknown | undefined
+type GhostMesh = {
+	geometry?: { dispose?(): void }
+	material?: unknown
+	position: { copy(v: unknown): void }
+	quaternion: { copy(v: unknown): void }
+	scale: { copy(v: unknown): void }
+	updateMatrix(): void
+	matrixAutoUpdate: boolean
+	name?: string
+	renderOrder?: number
+	frustumCulled?: boolean
+	no_export?: boolean
+}
+
+type SrcMesh = {
+	geometry?: unknown
+	updateWorldMatrix?(updateParents: boolean, updateChildren: boolean): void
+	getWorldPosition(target: unknown): unknown
+	getWorldQuaternion(target: unknown): unknown
+	getWorldScale(target: unknown): unknown
+}
+
+type GhostDirection = 'past' | 'future'
+
+let ghostRoot: { add(c: unknown): void; remove(c: unknown): void } | undefined
 let busy = false
 
-function ensureRoot(): unknown {
+// `${srcNodeUuid}|${'past' | 'future'}` をキーに ghost mesh を保持。
+// selection / 子構成が同じ間は再利用して transform だけ更新する (= GC ストッター対策の本体)。
+const ghostMeshes = new Map<string, GhostMesh>()
+// 「同じ集合の上で transform だけ更新できるか」 を判定するための signature。
+// `${groupUuid}|${子 uuid を巡回順に join}` で表現。 forEachChild 順序は安定と仮定。
+let lastSrcSignature: string | undefined
+
+// material は past/future で 1 つずつ共有 (= ghost dispose 時も触らない、 plugin unload でのみ dispose)。
+let pastMaterial: { dispose?(): void } | undefined
+let futureMaterial: { dispose?(): void } | undefined
+
+// transform 取得用の一時 Vector/Quaternion (= frame 毎の allocation を抑える)。
+// THREE が globals に居ないとき (= plugin load gate で弾く前) は touch しないため遅延初期化。
+let tmpsInited = false
+let tmpVec1: unknown
+let tmpQuat: unknown
+let tmpVec2: unknown
+function ensureTmps(): void {
+	if (tmpsInited) return
+	tmpVec1 = new (THREE.Vector3 as new () => unknown)()
+	tmpQuat = new (THREE.Quaternion as new () => unknown)()
+	tmpVec2 = new (THREE.Vector3 as new () => unknown)()
+	tmpsInited = true
+}
+
+function ensureRoot(): { add(c: unknown): void; remove(c: unknown): void } {
 	if (ghostRoot) return ghostRoot
 	const root = new (THREE.Object3D as new () => Record<string, unknown>)()
 	root.name = ROOT_NAME
 	root.no_export = true
 	Canvas?.scene?.add(root)
-	ghostRoot = root
-	return root
+	ghostRoot = root as { add(c: unknown): void; remove(c: unknown): void }
+	return ghostRoot
 }
 
-function disposeObject(root: unknown): void {
-	const r = root as { traverse?(cb: (obj: unknown) => void); children?: Array<unknown>; remove?(c: unknown): void }
-	if (!r?.traverse) return
-	r.traverse(obj => {
-		const o = obj as { geometry?: { dispose?(): void }; material?: { dispose?(): void } | Array<{ dispose?(): void }> }
-		o.geometry?.dispose?.()
-		if (Array.isArray(o.material)) o.material.forEach(m => m.dispose?.())
-		else o.material?.dispose?.()
-	})
-	const kids = (r.children ?? []).slice()
-	for (const c of kids) r.remove?.(c)
-}
-
-function clearGhosts(): void {
-	if (ghostRoot) disposeObject(ghostRoot)
+function getMaterial(direction: GhostDirection): unknown {
+	if (direction === 'past') {
+		if (!pastMaterial) pastMaterial = makeGhostMaterial(COLOR_PAST) as { dispose?(): void }
+		return pastMaterial
+	}
+	if (!futureMaterial) futureMaterial = makeGhostMaterial(COLOR_FUTURE) as { dispose?(): void }
+	return futureMaterial
 }
 
 function makeGhostMaterial(color: number): unknown {
@@ -115,46 +162,61 @@ function makeGhostMaterial(color: number): unknown {
 	})
 }
 
-type MeshLike = {
-	geometry?: unknown
-	updateWorldMatrix?(updateParents: boolean, updateChildren: boolean): void
-	getWorldPosition(target: unknown): unknown
-	getWorldQuaternion(target: unknown): unknown
-	getWorldScale(target: unknown): unknown
-}
-
-function cloneSubtreeAtCurrentPose(group: NonNullable<NonNullable<typeof Group>['first_selected']>, color: number): unknown {
-	const batch = new (THREE.Object3D as new () => Record<string, unknown>)()
-	batch.name = `${group.uuid}_ghost_batch`
+// 選択 Group subtree を走査して、 ghost にできる src node entry の配列を返す。
+// 「ghost にできる」 = mesh + geometry + visibility ≠ false + geometry.clone 関数あり。
+function collectGhostableSrcs(group: NonNullable<NonNullable<typeof Group>['first_selected']>): Array<{ uuid: string; src: SrcMesh }> {
+	const list: Array<{ uuid: string; src: SrcMesh }> = []
 	group.forEachChild((node) => {
-		const src = node.mesh as MeshLike | undefined
+		const src = node.mesh as SrcMesh | undefined
 		if (!src?.geometry || node.visibility === false) return
-		// geometry.clone() の存在を runtime 検査 : AJ 拡張型や独自 mesh で `clone` を
-		// 持たない object が来た場合に毎 rebuild で throw + catch → ghost 消滅、
-		// を silent skip に変えて他 node の ghost 生成を継続する。
+		// geometry.clone 関数を持たない実装 (= AJ 拡張型 / 独自 mesh) は silent skip。
+		// v0.2 で type ガード追加済、 v0.3 でも維持。
 		const geom = src.geometry as { clone?: () => unknown }
 		if (typeof geom.clone !== 'function') return
-		const geomClone = geom.clone()
-		const copy = new (THREE.Mesh as new (g: unknown, m: unknown) => Record<string, unknown>)(geomClone, makeGhostMaterial(color))
-		copy.name = `${node.uuid}_ghost`
-		copy.no_export = true
-		copy.renderOrder = 10
-		copy.frustumCulled = false
-		src.updateWorldMatrix?.(true, false)
-		const tmpV1 = new (THREE.Vector3 as new () => unknown)()
-		const tmpQ = new (THREE.Quaternion as new () => unknown)()
-		const tmpV2 = new (THREE.Vector3 as new () => unknown)()
-		// Three.js の Object3D.position / quaternion / scale は内部固定の Vector3/Quaternion で、
-		// 別 instance を直接 assign すると Object3D 側の matrix 計算に反映されない (= 描画位置が更新されない)。
-		// v0.2 初版は `copy.position = src.getWorldPosition(tmpV1)` の直接 assign で参照バグを抱えていた
-		// (= past/future ghost が同位置に重なる、 オレンジしか見えなくなる)。 現在は .copy() で
-		// 「値だけ」 を内部 instance に書き込む経路に修正済。
-		;(copy.position as { copy(v: unknown): void }).copy(src.getWorldPosition(tmpV1))
-		;(copy.quaternion as { copy(v: unknown): void }).copy(src.getWorldQuaternion(tmpQ))
-		;(copy.scale as { copy(v: unknown): void }).copy(src.getWorldScale(tmpV2))
-		;(batch as { add(c: unknown): void }).add(copy)
+		list.push({ uuid: node.uuid, src })
 	})
-	return batch
+	return list
+}
+
+// src 1 件 + direction から ghost mesh を取得 (= 既存ならそのまま、 未生成なら作って Map と root に add)。
+// geometry は src.geometry.clone() で 1 回だけ作って ghost に固定、 以後は src 変形に追従しない。
+// (= 通常 src の geometry は mesh edit でしか変わらず、 そのときは selection/構成変動扱いで Map 全リセットされる)
+function ensureGhost(entry: { uuid: string; src: SrcMesh }, direction: GhostDirection): GhostMesh {
+	const key = `${entry.uuid}|${direction}`
+	const existing = ghostMeshes.get(key)
+	if (existing) return existing
+
+	const geom = (entry.src.geometry as { clone(): unknown }).clone()
+	const mesh = new (THREE.Mesh as new (g: unknown, m: unknown) => Record<string, unknown>)(geom, getMaterial(direction)) as GhostMesh & Record<string, unknown>
+	mesh.name = `${entry.uuid}_ghost_${direction}`
+	mesh.no_export = true
+	mesh.renderOrder = 10
+	mesh.frustumCulled = false
+	// 通常 frame は updateMatrix() を手動で呼ぶ前提 (= 内部の auto 計算を切って計算量削減)。
+	mesh.matrixAutoUpdate = false
+	ghostMeshes.set(key, mesh as GhostMesh)
+	ensureRoot().add(mesh)
+	return mesh as GhostMesh
+}
+
+// src の現在 world transform を ghost に .copy() で書き戻して、 手動 updateMatrix() で内部 matrix 更新。
+// Three.js の Object3D.position / quaternion / scale は内部固定 instance なので、 別 instance assign は NG。
+function applyTransformFromSrc(ghost: GhostMesh, src: SrcMesh): void {
+	src.updateWorldMatrix?.(true, false)
+	ghost.position.copy(src.getWorldPosition(tmpVec1))
+	ghost.quaternion.copy(src.getWorldQuaternion(tmpQuat))
+	ghost.scale.copy(src.getWorldScale(tmpVec2))
+	ghost.updateMatrix()
+}
+
+// Map と root から全 ghost を取り除いて geometry を dispose。 material は共有なので触らない。
+function disposeAllGhosts(): void {
+	const root = ghostRoot
+	for (const ghost of ghostMeshes.values()) {
+		ghost.geometry?.dispose?.()
+		root?.remove(ghost)
+	}
+	ghostMeshes.clear()
 }
 
 function applyPoseAt(time: number): void {
@@ -186,29 +248,51 @@ function rebuildGhosts(): void {
 	// OFF / 編集モード外 / Animation 未選択 のいずれかなら、 既存 ghost を消してから抜ける。
 	// (= 早期 return だけだと前回 ghost が scene に残ってメモリも保持されたままになる)
 	if (!filterState.onionSkin || !Modes?.animate || !Animation?.selected) {
-		clearGhosts()
+		disposeAllGhosts()
+		lastSrcSignature = undefined
 		return
 	}
 	const group = Group?.selected?.[0] ?? Group?.first_selected
 	if (!group?.mesh) {
-		clearGhosts()
+		disposeAllGhosts()
+		lastSrcSignature = undefined
 		return
 	}
 	busy = true
 	try {
-		clearGhosts()
-		const root = ensureRoot() as { add(c: unknown): void }
+		ensureTmps()
+		ensureRoot()
 		const step = Timeline?.getStep?.() ?? DEFAULT_STEP
 		const now = Timeline?.time ?? 0
+
+		// 選択 Group の子構成 signature を計算 → 前回と違えば Map を全リセット
+		// (= selection 変動 / 子追加削除 / visibility 変動 / 別 group へ切替 を一括検知)。
+		// 一致なら ghost mesh を再利用、 transform だけ書き戻す。
+		const srcs = collectGhostableSrcs(group)
+		const signature = `${group.uuid}|${srcs.map((e) => e.uuid).join(',')}`
+		if (signature !== lastSrcSignature) {
+			disposeAllGhosts()
+			lastSrcSignature = signature
+		}
+
+		// past pose → 全 ghost に past transform 反映
 		withPoseAt(Math.max(0, now - step), () => {
-			root.add(cloneSubtreeAtCurrentPose(group, COLOR_PAST))
+			for (const entry of srcs) {
+				const ghost = ensureGhost(entry, 'past')
+				applyTransformFromSrc(ghost, entry.src)
+			}
 		})
+		// future pose → 全 ghost に future transform 反映
 		withPoseAt(now + step, () => {
-			root.add(cloneSubtreeAtCurrentPose(group, COLOR_FUTURE))
+			for (const entry of srcs) {
+				const ghost = ensureGhost(entry, 'future')
+				applyTransformFromSrc(ghost, entry.src)
+			}
 		})
 	} catch (e) {
 		console.warn('[anim_ux] onion skin rebuild failed', e)
-		clearGhosts()
+		disposeAllGhosts()
+		lastSrcSignature = undefined
 	} finally {
 		busy = false
 	}
@@ -224,13 +308,14 @@ function onSelection(): void {
 
 function onModeChange(): void {
 	// project reset / mode 切替で Canvas.scene が差し替わる可能性に備えて、
-	// ghost subtree の dispose だけでなく ghostRoot 自体も scene から外して破棄する。
-	// 次の rebuild で ensureRoot() が新 scene 上で再生成する。
+	// ghost mesh + ghostRoot を全部捨てる (= 次 rebuild で ensureRoot/ensureGhost が新 scene 上で再生成)。
+	// Map と signature もリセットして、 再生成経路を確実に通す。 material は共有なのでそのまま残す。
+	disposeAllGhosts()
 	if (ghostRoot) {
 		Canvas?.scene?.remove(ghostRoot)
-		disposeObject(ghostRoot)
 		ghostRoot = undefined
 	}
+	lastSrcSignature = undefined
 }
 
 // toggle 押下時の即時反映用 (= toggles.ts から呼ぶ、 event 待ちのラグを避ける)
@@ -258,10 +343,16 @@ export function installOnionSkin(): () => void {
 		Blockbench?.removeListener('select_mode', onModeChange)
 		Blockbench?.removeListener('unselect_project', onModeChange)
 		Blockbench?.removeListener('reset_project', onModeChange)
+		disposeAllGhosts()
 		if (ghostRoot) {
 			Canvas?.scene?.remove(ghostRoot)
-			disposeObject(ghostRoot)
 			ghostRoot = undefined
 		}
+		lastSrcSignature = undefined
+		// plugin unload 時のみ共有 material を dispose (= rebuild 経路では再利用される)
+		pastMaterial?.dispose?.()
+		pastMaterial = undefined
+		futureMaterial?.dispose?.()
+		futureMaterial = undefined
 	}
 }
