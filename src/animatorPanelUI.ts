@@ -146,12 +146,24 @@ export function findAnimatorList(): HTMLElement | undefined {
 	return (node.querySelector('#timeline_body_inner') as HTMLElement | null) ?? undefined
 }
 
+// filter bar は `#timeline_vue` の直前 (= panel body 最上部、 timecode より上、 横スクロール対象外)
+// に挿入する。 #timeline_body_inner 内に置くと横スクロールに巻き込まれて toggle が画面外に追い出される。
+function findBarInsertionPoint(): { container: HTMLElement; before: Element } | undefined {
+	const node = (typeof Panels !== 'undefined' ? Panels : undefined)?.timeline?.node
+	if (!node) return undefined
+	const timelineVue = node.querySelector<HTMLElement>('#timeline_vue')
+	if (!timelineVue?.parentElement) return undefined
+	return { container: timelineVue.parentElement, before: timelineVue }
+}
+
 function ensureBarInPlace(): void {
-	const list = findAnimatorList()
-	if (!list) return
-	if (installedBar && list.firstChild === installedBar) return
+	const ip = findBarInsertionPoint()
+	if (!ip) return
+	if (installedBar && installedBar.parentElement === ip.container && installedBar.nextSibling === ip.before) {
+		return
+	}
 	if (!installedBar) installedBar = buildBar()
-	list.prepend(installedBar)
+	ip.container.insertBefore(installedBar, ip.before)
 }
 
 function collectSelectedGroupUuids(): Set<string> {
