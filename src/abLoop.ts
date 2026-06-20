@@ -27,20 +27,15 @@ declare const Timeline:
 	| undefined
 declare const Action: new (id: string, opts: Record<string, unknown>) => { delete(): void }
 declare const Keybind: new (opts: Record<string, unknown>) => unknown
-declare const Modes: { animate: boolean } | undefined
-declare const Animation: { selected?: unknown } | undefined
-declare const Prop: { active_panel?: string } | undefined
 
 let loopStart: number | undefined
 let loopEnd: number | undefined
 let watchHandle: number | undefined
 
-function condition(): boolean {
-	const modes = typeof Modes !== 'undefined' ? Modes : undefined
-	const anim = typeof Animation !== 'undefined' ? Animation : undefined
-	const prop = typeof Prop !== 'undefined' ? Prop : undefined
-	return Boolean(modes?.animate && anim?.selected && prop?.active_panel === 'timeline')
-}
+// BB 正式仕様の condition object 形式 (= `Animate` モード時のみ発火)。
+// v0.2 初版は function 渡し + Prop.active_panel === 'timeline' 判定だったが、
+// 後者は再生中等で外れる可能性 + 実機検証で shortcut 反応せず、 modes 制約のみに簡素化。
+const ACTION_CONDITION = { modes: ['animate'] }
 
 function tick(): void {
 	const timeline = typeof Timeline !== 'undefined' ? Timeline : undefined
@@ -75,18 +70,16 @@ function stopWatch(): void {
 let actions: Array<{ delete(): void }> = []
 
 export function installAbLoop(): () => void {
-	const KEY_A = 65
-	const KEY_B = 66
-	const KEY_L = 76
-	const KEY_X = 88
-
+	// keybind は BB 標準スタイルの **文字列指定** (= 内部で `key.toUpperCase().charCodeAt(0)` 変換)。
+	// 初版は numeric keyCode (= 65 等) を渡してたが、 v0.1 の arrow key (= 37/39) と挙動が
+	// 違って alphabet では fire しないケースがあったため、 BB 例 (= bbmodel.js:872 等) に揃えて string に。
 	actions.push(
 		new Action('anim_ux_set_loop_start', {
 			name: 'Anim UX: Set A-B Loop Start at Current Time',
 			icon: 'first_page',
 			category: 'animation',
-			keybind: new Keybind({ key: KEY_A, alt: true, shift: true }),
-			condition,
+			keybind: new Keybind({ key: 'a', alt: true, shift: true }),
+			condition: ACTION_CONDITION,
 			click() {
 				const timeline = typeof Timeline !== 'undefined' ? Timeline : undefined
 				if (timeline) loopStart = timeline.time
@@ -98,8 +91,8 @@ export function installAbLoop(): () => void {
 			name: 'Anim UX: Set A-B Loop End at Current Time',
 			icon: 'last_page',
 			category: 'animation',
-			keybind: new Keybind({ key: KEY_B, alt: true, shift: true }),
-			condition,
+			keybind: new Keybind({ key: 'b', alt: true, shift: true }),
+			condition: ACTION_CONDITION,
 			click() {
 				const timeline = typeof Timeline !== 'undefined' ? Timeline : undefined
 				if (timeline) loopEnd = timeline.time
@@ -111,8 +104,8 @@ export function installAbLoop(): () => void {
 			name: 'Anim UX: Toggle A-B Loop',
 			icon: 'loop',
 			category: 'animation',
-			keybind: new Keybind({ key: KEY_L, alt: true, shift: true }),
-			condition,
+			keybind: new Keybind({ key: 'l', alt: true, shift: true }),
+			condition: ACTION_CONDITION,
 			click() {
 				filterState.abLoop = !filterState.abLoop
 				// shortcut 経由でも filter bar の class 状態を反映 (= toggles.ts の共通関数を流用)
@@ -125,8 +118,8 @@ export function installAbLoop(): () => void {
 			name: 'Anim UX: Clear A-B Loop Range',
 			icon: 'clear',
 			category: 'animation',
-			keybind: new Keybind({ key: KEY_X, alt: true, shift: true }),
-			condition,
+			keybind: new Keybind({ key: 'x', alt: true, shift: true }),
+			condition: ACTION_CONDITION,
 			click() {
 				loopStart = undefined
 				loopEnd = undefined
