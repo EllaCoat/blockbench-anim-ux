@@ -67,14 +67,19 @@ const CSS = `
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	/* BB の setup.css は素の <button> に min-width:100px / padding-left/right:16px / box-shadow を
+	   付けてくるので、 class specificity で勝っても width 指定が min-width に負けて 100px 表示になる。
+	   ここで明示的に打ち消す。 height は class > element specificity で 24px が効いてる。 */
 	width: 24px;
 	height: 24px;
+	min-width: 0;
+	padding: 0;
+	box-shadow: none;
 	background: transparent;
 	color: var(--color-text);
 	border: 1px solid transparent;
 	border-radius: 2px;
 	cursor: pointer;
-	padding: 0;
 }
 .${TOGGLE_CLASS}:hover {
 	background: var(--color-button);
@@ -85,6 +90,8 @@ const CSS = `
 }
 .${TOGGLE_CLASS} i {
 	font-size: 16px;
+	/* setup.css の "button > i" rule の margin-right:4px を打ち消し (= 余白 4px 残ると button 幅が広がる) */
+	margin: 0;
 }
 
 /* breadcrumb tooltip — span 自身の pointer-events を復活させて、 mouseover を JS 側で拾えるようにする。
