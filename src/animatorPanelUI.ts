@@ -23,10 +23,13 @@ declare const Timeline:
 	  }
 	| undefined
 
+// filter bar 上の toggle 群の状態。 純粋なフィルタリング (= keyframesOnly / onlySelected) に加え、
+// 動作系 toggle (= autoScroll) も同じ state に乗せて UI ロジックを単純化している。
 export interface FilterState {
 	query: string
 	keyframesOnly: boolean
 	onlySelected: boolean
+	autoScroll: boolean
 }
 
 const STYLE_ID = 'anim-ux-style'
@@ -88,18 +91,31 @@ const CSS = `
 .timeline_animator_name[data-anim-ux-breadcrumb] {
 	pointer-events: auto !important;
 }
+
+/* autoScroll flash — E 機能で scrollIntoView した直後の row を 600ms だけ強調する。
+   accent 色から transparent へ fade する keyframe で、 keyframe 終了後は CSS 上の残留なし。
+   anim-ux-flash class は autoScroll.ts 側で setTimeout 後に remove される (= 二重保険)。 */
+li.animator.anim-ux-flash {
+	animation: anim-ux-flash-fade 600ms ease-out;
+}
+@keyframes anim-ux-flash-fade {
+	0% { background: var(--color-accent); }
+	100% { background: transparent; }
+}
 `
 
 export const filterState: FilterState = {
 	query: '',
 	keyframesOnly: false,
 	onlySelected: false,
+	autoScroll: false,
 }
 
 const FILTER_DEFAULTS: FilterState = {
 	query: '',
 	keyframesOnly: false,
 	onlySelected: false,
+	autoScroll: false,
 }
 
 let installedBar: HTMLElement | undefined
@@ -139,6 +155,7 @@ function buildBar(): HTMLElement {
 	const toggles: Array<[keyof FilterState, string, string]> = [
 		['keyframesOnly', 'filter_alt', 'Show only animators with keyframes in this animation'],
 		['onlySelected', 'link', 'Sync with 3D selection'],
+		['autoScroll', 'gps_fixed', 'Auto-scroll panel to 3D selection'],
 	]
 	for (const [key, icon, title] of toggles) {
 		const btn = document.createElement('button')
@@ -271,6 +288,7 @@ export function installAnimatorPanelUI(): () => void {
 		filterState.query = FILTER_DEFAULTS.query
 		filterState.keyframesOnly = FILTER_DEFAULTS.keyframesOnly
 		filterState.onlySelected = FILTER_DEFAULTS.onlySelected
+		filterState.autoScroll = FILTER_DEFAULTS.autoScroll
 
 		installedBar?.remove()
 		installedBar = undefined

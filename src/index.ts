@@ -3,6 +3,7 @@
 // 大型モデル (= ボーン 100+ 等) でのアニメーション作成効率化を目的とする。
 
 import { installAnimatorPanelUI } from './animatorPanelUI'
+import { installAutoScroll } from './autoScroll'
 import { installBreadcrumbs } from './breadcrumb'
 import { installKeyframeJump } from './keyframeJump'
 import { installSearchHandler } from './search'
@@ -28,6 +29,7 @@ Plugin.register(PLUGIN_ID, {
 		cleanups.push(installTogglesHandler())
 		cleanups.push(installBreadcrumbs())
 		cleanups.push(installKeyframeJump())
+		cleanups.push(installAutoScroll())
 	},
 	onunload() {
 		for (const fn of cleanups) {
