@@ -15,7 +15,7 @@
 //   - A > B の逆向き範囲は不正扱いで巻き戻さない (= ユーザーミスを silent fail させて事故を防ぐ)
 //   - 視覚的な範囲マーカー (= timeline 縦線) は v0.2 では未実装、 v0.3 で追加検討
 
-import { filterState } from './animatorPanelUI'
+import { filterState, registerRefreshCallback } from './animatorPanelUI'
 import { syncToggleVisuals } from './toggles'
 
 declare const Timeline:
@@ -36,6 +36,24 @@ let watchHandle: number | undefined
 // v0.2 初版は function 渡し + Prop.active_panel === 'timeline' 判定だったが、
 // 後者は再生中等で外れる可能性 + 実機検証で shortcut 反応せず、 modes 制約のみに簡素化。
 const ACTION_CONDITION = { modes: ['animate'] }
+
+// filter bar 右端の status span (= "A: 1.23s B: 2.45s") を現状で書き換える。
+// shortcut 経由で値が変わった瞬間に呼んで即時反映 + refresh callback でも呼んで
+// MutationObserver で bar が再 inject された後の state も追従する。
+function formatTime(t: number | undefined): string {
+	if (t === undefined) return '—'
+	return `${t.toFixed(2)}s`
+}
+
+function updateAbLoopStatus(): void {
+	const span = document.querySelector<HTMLElement>('.anim-ux-ab-status')
+	if (!span) return
+	if (loopStart === undefined && loopEnd === undefined) {
+		span.textContent = '—'
+		return
+	}
+	span.textContent = `A:${formatTime(loopStart)} B:${formatTime(loopEnd)}`
+}
 
 function tick(): void {
 	const timeline = typeof Timeline !== 'undefined' ? Timeline : undefined
@@ -83,6 +101,7 @@ export function installAbLoop(): () => void {
 			click() {
 				const timeline = typeof Timeline !== 'undefined' ? Timeline : undefined
 				if (timeline) loopStart = timeline.time
+				updateAbLoopStatus()
 			},
 		})
 	)
@@ -96,6 +115,7 @@ export function installAbLoop(): () => void {
 			click() {
 				const timeline = typeof Timeline !== 'undefined' ? Timeline : undefined
 				if (timeline) loopEnd = timeline.time
+				updateAbLoopStatus()
 			},
 		})
 	)
@@ -123,13 +143,18 @@ export function installAbLoop(): () => void {
 			click() {
 				loopStart = undefined
 				loopEnd = undefined
+				updateAbLoopStatus()
 			},
 		})
 	)
 
+	// MutationObserver で bar が再 inject された後の状態追従 (= 新しい span に再描画)
+	const unregisterRefresh = registerRefreshCallback(updateAbLoopStatus)
+
 	startWatch()
 
 	return () => {
+		unregisterRefresh()
 		for (const a of actions) {
 			try {
 				a.delete()

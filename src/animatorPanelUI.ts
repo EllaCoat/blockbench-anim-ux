@@ -39,6 +39,7 @@ const STYLE_ID = 'anim-ux-style'
 const BAR_CLASS = 'anim-ux-bar'
 const SEARCH_CLASS = 'anim-ux-search'
 const TOGGLE_CLASS = 'anim-ux-toggle'
+const AB_STATUS_CLASS = 'anim-ux-ab-status'
 
 const CSS = `
 .${BAR_CLASS} {
@@ -95,15 +96,14 @@ const CSS = `
 	pointer-events: auto !important;
 }
 
-/* autoScroll flash — E 機能で scrollIntoView した直後の row を 600ms だけ強調する。
-   accent 色から transparent へ fade する keyframe で、 keyframe 終了後は CSS 上の残留なし。
-   anim-ux-flash class は autoScroll.ts 側で setTimeout 後に remove される (= 二重保険)。 */
-li.animator.anim-ux-flash {
-	animation: anim-ux-flash-fade 600ms ease-out;
-}
-@keyframes anim-ux-flash-fade {
-	0% { background: var(--color-accent); }
-	100% { background: transparent; }
+/* A-B loop status — filter bar 右端に「A: 1.23s B: 2.45s」 を muted text で表示。
+   loopStart / loopEnd が undefined のときは "—" (= ダッシュ) を表示。 abLoop.ts 側で更新。 */
+.${AB_STATUS_CLASS} {
+	font-size: 11px;
+	color: var(--color-subtle_text, #888);
+	white-space: nowrap;
+	margin-left: 4px;
+	font-family: var(--font-code, monospace);
 }
 `
 
@@ -172,6 +172,13 @@ function buildBar(): HTMLElement {
 		btn.innerHTML = `<i class="material-icons">${icon}</i>`
 		bar.appendChild(btn)
 	}
+
+	// A-B loop の current state 表示用 span (= 内容は abLoop.ts 側から更新)。
+	// 最初は "—" のダッシュ表示、 set されたら "A: 1.23s B: 2.45s" 形式に書き換わる。
+	const abStatus = document.createElement('span')
+	abStatus.className = AB_STATUS_CLASS
+	abStatus.textContent = '—'
+	bar.appendChild(abStatus)
 
 	return bar
 }
