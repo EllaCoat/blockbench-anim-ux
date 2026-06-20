@@ -1,51 +1,25 @@
 // blockbench-anim-ux — B + C: 「keyframes only」 / 「only show selected」 toggle
 //
 // filter bar 内の <button.anim-ux-toggle> 2 個に対するクリックを delegated に listen。
-// onlySelected = true の間だけ、 rAF で OutlinerNode selection 状態を watch して applyFilter を再発火する。
-// (= BB の select 経路は複数あるので、 個別 patch ではなく state polling で確実に拾う。
-//    Group.all だと AJ 拡張型 (= NullObject / Locator / VanillaItemDisplay) の選択が拾えないので OutlinerNode.uuids 全走査)
+// onlySelected = true の間だけ selectionWatch に listener を 1 本登録して applyFilter を再発火する。
+// (= 選択変化検知は selectionWatch.ts に共通化済 = v0.2 で E 機能とも共有)
 
 import { applyFilter, filterState, type FilterState } from './animatorPanelUI'
-
-declare const OutlinerNode:
-	| { uuids: Record<string, { selected?: boolean } | undefined> }
-	| undefined
+import { addSelectionListener } from './selectionWatch'
 
 const TOGGLE_SELECTOR = '.anim-ux-toggle'
 const TOGGLE_KEYS: Array<keyof FilterState> = ['keyframesOnly', 'onlySelected']
 
-let watchHandle: number | undefined
-let prevSelectedKey = ''
-
-function snapshotSelectedKey(): string {
-	const uuids = (typeof OutlinerNode !== 'undefined' ? OutlinerNode : undefined)?.uuids
-	if (!uuids) return ''
-	const ids: string[] = []
-	for (const uuid in uuids) {
-		if (uuids[uuid]?.selected) ids.push(uuid)
-	}
-	ids.sort()
-	return ids.join(',')
-}
+let unsubscribeSelection: (() => void) | undefined
 
 function startSelectionWatch(): void {
-	if (watchHandle !== undefined) return
-	prevSelectedKey = snapshotSelectedKey()
-	const tick = () => {
-		const cur = snapshotSelectedKey()
-		if (cur !== prevSelectedKey) {
-			prevSelectedKey = cur
-			applyFilter()
-		}
-		watchHandle = requestAnimationFrame(tick)
-	}
-	watchHandle = requestAnimationFrame(tick)
+	if (unsubscribeSelection) return
+	unsubscribeSelection = addSelectionListener(() => applyFilter())
 }
 
 function stopSelectionWatch(): void {
-	if (watchHandle === undefined) return
-	cancelAnimationFrame(watchHandle)
-	watchHandle = undefined
+	unsubscribeSelection?.()
+	unsubscribeSelection = undefined
 }
 
 // 同 panel 内の全 toggle button (= 同一 key を持つもの含む) に active class を反映。
