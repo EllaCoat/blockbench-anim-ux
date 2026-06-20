@@ -2,12 +2,18 @@
 //
 // 役割 :
 //   - Panels.timeline.node 内の #timeline_body_inner を MutationObserver で監視
-//   - filter bar (= search input + toggle 2 個) を 1 回だけ inject、 unload 時に remove
+//   - filter bar (= search input + toggle 4 個 = keyframesOnly / onlySelected / abLoop / onionSkin)
+//     を 1 回だけ inject、 unload 時に remove
 //   - applyFilter() で全 <li class="animator"> に CSS display toggle を当てる
 //   - filter state は module level に保持し、 後続の search / toggles ファイルから書き換えて再描画
+//   - abLoop / onionSkin は filter ではなく動作系 toggle、 同じ state に乗せて UI を統一
 
 declare const Panels: { timeline?: { node?: HTMLElement } } | undefined
-declare const Group: { all: Array<{ uuid: string; selected: boolean }> } | undefined
+// OutlinerNode.uuids は Group / NullObject / Locator / VanillaItemDisplay 等を含む全 outliner node の uuid → node map
+// (= Group.all は Group 型のみで、 AJ 拡張型を拾いたいときは OutlinerNode 経由が筋)
+declare const OutlinerNode:
+	| { uuids: Record<string, { selected?: boolean } | undefined> }
+	| undefined
 declare const Timeline:
 	| {
 			animators: Array<{
@@ -19,16 +25,21 @@ declare const Timeline:
 	  }
 	| undefined
 
+// filter bar 上の toggle 群の状態。 純粋なフィルタリング (= keyframesOnly / onlySelected) に加え、
+// 動作系 toggle (= abLoop / onionSkin) も同じ state に乗せて UI ロジックを単純化している。
 export interface FilterState {
 	query: string
 	keyframesOnly: boolean
 	onlySelected: boolean
+	abLoop: boolean
+	onionSkin: boolean
 }
 
 const STYLE_ID = 'anim-ux-style'
 const BAR_CLASS = 'anim-ux-bar'
 const SEARCH_CLASS = 'anim-ux-search'
 const TOGGLE_CLASS = 'anim-ux-toggle'
+const AB_STATUS_CLASS = 'anim-ux-ab-status'
 
 const CSS = `
 .${BAR_CLASS} {
@@ -84,18 +95,32 @@ const CSS = `
 .timeline_animator_name[data-anim-ux-breadcrumb] {
 	pointer-events: auto !important;
 }
+
+/* A-B loop status — filter bar 右端に「A:0f B:20f」 を muted text で frame 表記表示。
+   loopStart / loopEnd が undefined のときは "—" (= ダッシュ) を表示。 abLoop.ts 側で更新。 */
+.${AB_STATUS_CLASS} {
+	font-size: 11px;
+	color: var(--color-subtle_text, #888);
+	white-space: nowrap;
+	margin-left: 4px;
+	font-family: var(--font-code, monospace);
+}
 `
 
 export const filterState: FilterState = {
 	query: '',
 	keyframesOnly: false,
 	onlySelected: false,
+	abLoop: false,
+	onionSkin: false,
 }
 
 const FILTER_DEFAULTS: FilterState = {
 	query: '',
 	keyframesOnly: false,
 	onlySelected: false,
+	abLoop: false,
+	onionSkin: false,
 }
 
 let installedBar: HTMLElement | undefined
@@ -135,6 +160,8 @@ function buildBar(): HTMLElement {
 	const toggles: Array<[keyof FilterState, string, string]> = [
 		['keyframesOnly', 'filter_alt', 'Show only animators with keyframes in this animation'],
 		['onlySelected', 'link', 'Sync with 3D selection'],
+		['abLoop', 'loop', 'A-B loop playback (Alt+Shift+A/B set, Alt+Shift+L toggle, Alt+Shift+X clear)'],
+		['onionSkin', 'layers', 'Onion Skin: show selected group ±1 frame ghosts'],
 	]
 	for (const [key, icon, title] of toggles) {
 		const btn = document.createElement('button')
@@ -145,6 +172,13 @@ function buildBar(): HTMLElement {
 		btn.innerHTML = `<i class="material-icons">${icon}</i>`
 		bar.appendChild(btn)
 	}
+
+	// A-B loop の current state 表示用 span (= 内容は abLoop.ts 側から更新)。
+	// 最初は "—" のダッシュ表示、 set されたら "A:0f B:20f" 形式 (= frame 後置) に書き換わる。
+	const abStatus = document.createElement('span')
+	abStatus.className = AB_STATUS_CLASS
+	abStatus.textContent = '—'
+	bar.appendChild(abStatus)
 
 	return bar
 }
@@ -175,12 +209,12 @@ function ensureBarInPlace(): void {
 	ip.container.insertBefore(installedBar, ip.before)
 }
 
-function collectSelectedGroupUuids(): Set<string> {
+function collectSelectedNodeUuids(): Set<string> {
 	const set = new Set<string>()
-	const all = (typeof Group !== 'undefined' ? Group : undefined)?.all
-	if (!all) return set
-	for (const g of all) {
-		if (g.selected) set.add(g.uuid)
+	const uuids = (typeof OutlinerNode !== 'undefined' ? OutlinerNode : undefined)?.uuids
+	if (!uuids) return set
+	for (const uuid in uuids) {
+		if (uuids[uuid]?.selected) set.add(uuid)
 	}
 	return set
 }
@@ -192,7 +226,7 @@ export function applyFilter(): void {
 	const list = findAnimatorList()
 	if (!list) return
 	const q = filterState.query.trim().toLowerCase()
-	const selectedUuids = filterState.onlySelected ? collectSelectedGroupUuids() : undefined
+	const selectedUuids = filterState.onlySelected ? collectSelectedNodeUuids() : undefined
 
 	let keyframeMap: Map<string, boolean> | undefined
 	if (filterState.keyframesOnly) {
@@ -239,11 +273,6 @@ function scheduleRefresh(): void {
 	})
 }
 
-// filter bar 本体を取り出すヘルパー (= search / toggles からイベント attach 用)
-export function getInstalledBar(): HTMLElement | undefined {
-	return installedBar
-}
-
 export function installAnimatorPanelUI(): () => void {
 	injectStyleOnce()
 	ensureBarInPlace()
@@ -272,6 +301,8 @@ export function installAnimatorPanelUI(): () => void {
 		filterState.query = FILTER_DEFAULTS.query
 		filterState.keyframesOnly = FILTER_DEFAULTS.keyframesOnly
 		filterState.onlySelected = FILTER_DEFAULTS.onlySelected
+		filterState.abLoop = FILTER_DEFAULTS.abLoop
+		filterState.onionSkin = FILTER_DEFAULTS.onionSkin
 
 		installedBar?.remove()
 		installedBar = undefined

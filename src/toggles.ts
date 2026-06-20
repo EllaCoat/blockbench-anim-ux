@@ -1,54 +1,33 @@
 // blockbench-anim-ux — B + C: 「keyframes only」 / 「only show selected」 toggle
 //
 // filter bar 内の <button.anim-ux-toggle> 2 個に対するクリックを delegated に listen。
-// onlySelected = true の間だけ、 rAF で Group selection 状態を watch して applyFilter を再発火する。
-// (= BB の select 経路は複数あるので、 個別 patch ではなく state polling で確実に拾う)
+// onlySelected = true の間だけ selectionWatch に listener を 1 本登録して applyFilter を再発火する。
+// (= 選択変化検知は selectionWatch.ts に共通化済、 現状の購読者はここのみ)
 
 import { applyFilter, filterState, type FilterState } from './animatorPanelUI'
-
-declare const Group: { all: Array<{ uuid: string; selected: boolean }> } | undefined
+import { forceRefreshOnionSkin } from './onionSkin'
+import { addSelectionListener } from './selectionWatch'
 
 const TOGGLE_SELECTOR = '.anim-ux-toggle'
-const TOGGLE_KEYS: Array<keyof FilterState> = ['keyframesOnly', 'onlySelected']
+const TOGGLE_KEYS: Array<keyof FilterState> = ['keyframesOnly', 'onlySelected', 'abLoop', 'onionSkin']
 
-let watchHandle: number | undefined
-let prevSelectedKey = ''
-
-function snapshotSelectedKey(): string {
-	const all = (typeof Group !== 'undefined' ? Group : undefined)?.all
-	if (!all) return ''
-	const ids: string[] = []
-	for (const g of all) {
-		if (g.selected) ids.push(g.uuid)
-	}
-	ids.sort()
-	return ids.join(',')
-}
+let unsubscribeSelection: (() => void) | undefined
 
 function startSelectionWatch(): void {
-	if (watchHandle !== undefined) return
-	prevSelectedKey = snapshotSelectedKey()
-	const tick = () => {
-		const cur = snapshotSelectedKey()
-		if (cur !== prevSelectedKey) {
-			prevSelectedKey = cur
-			applyFilter()
-		}
-		watchHandle = requestAnimationFrame(tick)
-	}
-	watchHandle = requestAnimationFrame(tick)
+	if (unsubscribeSelection) return
+	unsubscribeSelection = addSelectionListener(() => applyFilter())
 }
 
 function stopSelectionWatch(): void {
-	if (watchHandle === undefined) return
-	cancelAnimationFrame(watchHandle)
-	watchHandle = undefined
+	unsubscribeSelection?.()
+	unsubscribeSelection = undefined
 }
 
 // 同 panel 内の全 toggle button (= 同一 key を持つもの含む) に active class を反映。
 // MutationObserver で bar が再 inject された後でも button が新規 element になるため、
 // applyFilter() を呼ぶたびに class 状態も再描画する。
-function syncToggleVisuals(): void {
+// export で他 module (= abLoop の shortcut 経由 toggle 等) からも呼べるようにしている。
+export function syncToggleVisuals(): void {
 	const buttons = document.querySelectorAll<HTMLElement>(TOGGLE_SELECTOR)
 	for (const btn of buttons) {
 		const key = btn.dataset.key as keyof FilterState | undefined
@@ -68,10 +47,16 @@ export function installTogglesHandler(): () => void {
 		// FilterState の各 key は boolean。 query (= string) は対象外なので switch で絞る。
 		if (key === 'keyframesOnly') filterState.keyframesOnly = next
 		else if (key === 'onlySelected') filterState.onlySelected = next
+		else if (key === 'abLoop') filterState.abLoop = next
+		else if (key === 'onionSkin') filterState.onionSkin = next
 
 		if (key === 'onlySelected') {
 			if (next) startSelectionWatch()
 			else stopSelectionWatch()
+		}
+		if (key === 'onionSkin') {
+			// toggle OFF 時に ghost を即消す / ON 時に即ビルドする (= 次の event 発火待ちのラグ回避)
+			forceRefreshOnionSkin()
 		}
 
 		syncToggleVisuals()

@@ -2,9 +2,11 @@
 // Animator panel 検索 / フィルタ / 3D 選択連動 / keyframe ジャンプの集約。
 // 大型モデル (= ボーン 100+ 等) でのアニメーション作成効率化を目的とする。
 
+import { installAbLoop } from './abLoop'
 import { installAnimatorPanelUI } from './animatorPanelUI'
 import { installBreadcrumbs } from './breadcrumb'
 import { installKeyframeJump } from './keyframeJump'
+import { installOnionSkin } from './onionSkin'
 import { installSearchHandler } from './search'
 import { installTogglesHandler } from './toggles'
 
@@ -18,17 +20,18 @@ Plugin.register(PLUGIN_ID, {
 	title: 'Animation UX',
 	author: 'EllaCoat',
 	description:
-		'Animator panel search, filter, 3D-selection sync, and keyframe-jump shortcuts for models with many bones.',
+		'Animator panel search, filter, 3D-selection sync, keyframe-jump shortcuts, A-B loop playback, and onion skin for animating models with many bones.',
 	icon: 'search',
 	variant: 'desktop',
-	version: '0.1.0',
+	version: '0.2.0',
 	onload() {
 		cleanups.push(installAnimatorPanelUI())
 		cleanups.push(installSearchHandler())
 		cleanups.push(installTogglesHandler())
 		cleanups.push(installBreadcrumbs())
 		cleanups.push(installKeyframeJump())
-		console.log(`[${PLUGIN_ID}] loaded`)
+		cleanups.push(installAbLoop())
+		cleanups.push(installOnionSkin())
 	},
 	onunload() {
 		for (const fn of cleanups) {
@@ -39,6 +42,5 @@ Plugin.register(PLUGIN_ID, {
 			}
 		}
 		cleanups = []
-		console.log(`[${PLUGIN_ID}] unloaded`)
 	},
 })
