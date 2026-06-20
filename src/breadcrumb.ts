@@ -1,13 +1,17 @@
-// blockbench-anim-ux — D: 階層インデント / パンくず保持 (= CSS :hover::after 版)
+// blockbench-anim-ux — D: 階層インデント / パンくず保持 (= body 直下 fixed tooltip 版)
 //
 // 役割 :
 //   - 各 <li class="animator"> の <span class="timeline_animator_name"> に親階層 path を data 属性で保存
-//   - 表示は animatorPanelUI.ts 内の CSS `:hover::after { content: attr(data-anim-ux-breadcrumb) }` で行う
+//   - mouseover で document.body 直下の fixed-position div として tooltip を表示
 //
-// なぜ CSS approach にしたか :
-//   - HTML `title` 属性 / JS の `mouseover` event を経由する tooltip は、 BB の draggable + 独自 mousedown 干渉で
-//     どちらも標準動作が抑制される現象を v0.1 実機検証で確認 (= title は完全 suppress、 mouseover は確認中)
-//   - CSS `:hover::after` は擬似要素を element 直下に絶対配置するため、 JS event に依存せず確実に動く
+// 表示位置 :
+//   - span の左端の左 12px に tooltip の右端を揃える (= span の左隣にぴったり配置)
+//   - 垂直方向は span の中央
+//
+// 表示位置を body 直下 fixed にした理由 :
+//   - timeline panel の中で z-index を上げても、 他 panel (= ANIMATIONS / MCP / KEYFRAME / PLACEHOLDERS 等)
+//     の方が BB の panel システムで上位 stacking context を持ち、 子の z-index がそれを超えられない
+//   - body 直下に置けば panel 階層と無関係、 viewport 基準で常に最前面に出せる
 
 import { findAnimatorList, registerRefreshCallback } from './animatorPanelUI'
 
@@ -20,6 +24,7 @@ declare const OutlinerNode:
 	| undefined
 
 const BREADCRUMB_ATTR = 'data-anim-ux-breadcrumb'
+const TOOLTIP_ID = 'anim-ux-tooltip'
 const NAME_SELECTOR = '.timeline_animator_name'
 
 function getOutlinerNode(uuid: string): OutlinerLike | undefined {
@@ -68,11 +73,84 @@ function clearAllBreadcrumbs(): void {
 	}
 }
 
+// ----- 独自 tooltip element (= body 直下 fixed) ------------------------------
+
+function ensureTooltipElement(): HTMLElement {
+	let el = document.getElementById(TOOLTIP_ID)
+	if (!el) {
+		el = document.createElement('div')
+		el.id = TOOLTIP_ID
+		el.style.cssText = [
+			'position: fixed',
+			'background: var(--color-back, #222)',
+			'color: var(--color-text, #ddd)',
+			'border: 1px solid var(--color-border, #444)',
+			'padding: 4px 8px',
+			'font-size: 12px',
+			'border-radius: 2px',
+			'z-index: 99999',
+			'pointer-events: none',
+			'display: none',
+			'max-width: 400px',
+			'white-space: nowrap',
+			'box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35)',
+		].join('; ')
+		document.body.appendChild(el)
+	}
+	return el
+}
+
+function showTooltipFor(target: HTMLElement, text: string): void {
+	const el = ensureTooltipElement()
+	const rect = target.getBoundingClientRect()
+	el.textContent = text
+	el.style.display = 'block'
+	// span 左端の左 12px に tooltip の右端を揃える (= span の左隣に密接配置)
+	el.style.left = ''
+	el.style.right = `${Math.max(8, window.innerWidth - rect.left + 12)}px`
+	el.style.top = `${rect.top + rect.height / 2}px`
+	el.style.transform = 'translateY(-50%)'
+}
+
+function hideTooltip(): void {
+	const el = document.getElementById(TOOLTIP_ID)
+	if (el) el.style.display = 'none'
+}
+
+function removeTooltipElement(): void {
+	document.getElementById(TOOLTIP_ID)?.remove()
+}
+
+// ----- event handlers (= delegated mouseover / mouseout) --------------------
+
+function onMouseOver(e: MouseEvent): void {
+	const target = (e.target as HTMLElement | null)?.closest(NAME_SELECTOR) as HTMLElement | null
+	if (!target) return
+	const bc = target.getAttribute(BREADCRUMB_ATTR)
+	if (!bc) {
+		hideTooltip()
+		return
+	}
+	showTooltipFor(target, bc)
+}
+
+function onMouseOut(e: MouseEvent): void {
+	const target = (e.target as HTMLElement | null)?.closest(NAME_SELECTOR) as HTMLElement | null
+	if (!target) return
+	hideTooltip()
+}
+
 export function installBreadcrumbs(): () => void {
 	const unregister = registerRefreshCallback(applyBreadcrumbs)
 	applyBreadcrumbs()
+	document.addEventListener('mouseover', onMouseOver, true)
+	document.addEventListener('mouseout', onMouseOut, true)
 	return () => {
 		unregister()
+		document.removeEventListener('mouseover', onMouseOver, true)
+		document.removeEventListener('mouseout', onMouseOut, true)
+		hideTooltip()
+		removeTooltipElement()
 		clearAllBreadcrumbs()
 	}
 }

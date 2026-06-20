@@ -76,40 +76,13 @@ const CSS = `
 	font-size: 16px;
 }
 
-/* breadcrumb tooltip — CSS :hover::after で擬似要素表示
+/* breadcrumb tooltip — span 自身の pointer-events を復活させて、 mouseover を JS 側で拾えるようにする。
    BB の panels.css 内 ".channel_head span.timeline_animator_name { pointer-events: none; }"
-   が hover event 自体を全て無効化していたので、 pointer-events を auto で復活させる。
-   さらに span 自身 + 祖先の overflow を visible に上書き (= ::after が clip されないように)、
-   hover 中の li.animator の z-index を持ち上げて stacking context を突破 (= animator panel 裏に隠れないように)。
-   tooltip は span 真下ではなく右 (= keyframe 領域上) に出して、 左カラムの被りを回避。 */
-li.animator:has(.timeline_animator_name[data-anim-ux-breadcrumb]:hover),
-.channel_head:has(.timeline_animator_name[data-anim-ux-breadcrumb]:hover),
-.animator_head_bar:has(.timeline_animator_name[data-anim-ux-breadcrumb]:hover) {
-	overflow: visible !important;
-	z-index: 100;
-}
+   が hover event 自体を全て無効化していたため、 これを auto で上書き。
+   tooltip 表示自体は breadcrumb.ts 側で document.body 直下に position: fixed で行う
+   (= timeline panel 内の stacking context を回避して、 他 panel の裏にも回り込まないように)。 */
 .timeline_animator_name[data-anim-ux-breadcrumb] {
-	position: relative;
 	pointer-events: auto !important;
-	overflow: visible !important;
-}
-.timeline_animator_name[data-anim-ux-breadcrumb]:hover::after {
-	content: attr(data-anim-ux-breadcrumb);
-	position: absolute;
-	right: 100%;
-	top: 50%;
-	transform: translateY(-50%);
-	margin-right: 12px;
-	background: var(--color-back);
-	color: var(--color-text);
-	border: 1px solid var(--color-border);
-	padding: 4px 8px;
-	font-size: 12px;
-	border-radius: 2px;
-	z-index: 10000;
-	pointer-events: none;
-	white-space: nowrap;
-	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 `
 
