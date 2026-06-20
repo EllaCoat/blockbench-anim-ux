@@ -79,9 +79,14 @@ const CSS = `
 /* breadcrumb tooltip — CSS :hover::after で擬似要素表示
    BB の panels.css 内 ".channel_head span.timeline_animator_name { pointer-events: none; }"
    が hover event 自体を全て無効化していたので、 pointer-events を auto で復活させる。
-   さらに span 自身 + .channel_head 親の overflow も visible に上書き (= ::after が clip されないように)。 */
-.channel_head:has(> .timeline_animator_name[data-anim-ux-breadcrumb]) {
+   さらに span 自身 + 祖先の overflow を visible に上書き (= ::after が clip されないように)、
+   hover 中の li.animator の z-index を持ち上げて stacking context を突破 (= animator panel 裏に隠れないように)。
+   tooltip は span 真下ではなく右 (= keyframe 領域上) に出して、 左カラムの被りを回避。 */
+li.animator:has(.timeline_animator_name[data-anim-ux-breadcrumb]:hover),
+.channel_head:has(.timeline_animator_name[data-anim-ux-breadcrumb]:hover),
+.animator_head_bar:has(.timeline_animator_name[data-anim-ux-breadcrumb]:hover) {
 	overflow: visible !important;
+	z-index: 100;
 }
 .timeline_animator_name[data-anim-ux-breadcrumb] {
 	position: relative;
@@ -91,9 +96,10 @@ const CSS = `
 .timeline_animator_name[data-anim-ux-breadcrumb]:hover::after {
 	content: attr(data-anim-ux-breadcrumb);
 	position: absolute;
-	left: 0;
-	top: 100%;
-	margin-top: 2px;
+	left: 100%;
+	top: 50%;
+	transform: translateY(-50%);
+	margin-left: 12px;
 	background: var(--color-back);
 	color: var(--color-text);
 	border: 1px solid var(--color-border);
