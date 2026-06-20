@@ -2,33 +2,41 @@
 //
 // 各 <li class="animator"> の名前 <span> に、 親階層をたどったパンくず (例: "root > arm_L > finger_L_03")
 // を title 属性として付与する。 フィルタで階層コンテキストが消えても、 hover で親 path が見える。
-// 本格的な「親 row 半透明残し」 は v0.2 以降に持ち越し、 まずは tooltip だけで補う最小実装。
 //
-// 性能 : applyBreadcrumbs ごとに Group.all を 1 回だけ Map にビルドし、 row ごとの lookup を O(1) に。
+// 実装ポイント :
+//   - `OutlinerNode.uuids[uuid]` で直接 lookup (= AJ 拡張型 NullObject / Locator / VanillaItemDisplay も含めて O(1))
+//   - 旧 v0.1 で使っていた `Group.all` は Group 型しか持たず AJ 拡張型で hit せず undefined となるバグの原因
+//   - 単独 name (= 親階層なし) でも tooltip を出す (= v0.1.1、 動作確認可能性向上)
 
 import { findAnimatorList, registerRefreshCallback } from './animatorPanelUI'
 
-type GroupNode = {
-	uuid: string
-	name: string
-	parent?: { name?: string; parent?: unknown } | string
-}
+type OutlinerLike = { name?: string; parent?: unknown }
 
-declare const Group: { all: Array<GroupNode> } | undefined
+declare const OutlinerNode:
+	| {
+			uuids: Record<string, OutlinerLike>
+	  }
+	| undefined
 
 const BREADCRUMB_ATTR = 'data-anim-ux-breadcrumb'
 
-function buildBreadcrumbFromTarget(target: GroupNode): string | undefined {
+function getOutlinerNode(uuid: string): OutlinerLike | undefined {
+	const uuids = (typeof OutlinerNode !== 'undefined' ? OutlinerNode : undefined)?.uuids
+	return uuids?.[uuid]
+}
+
+function buildBreadcrumb(uuid: string): string | undefined {
+	const target = getOutlinerNode(uuid)
+	if (!target || typeof target.name !== 'string') return undefined
 	const path: string[] = [target.name]
 	let cur: unknown = target.parent
 	const seen = new Set<unknown>()
 	while (cur && typeof cur === 'object' && !seen.has(cur)) {
 		seen.add(cur)
-		const node = cur as { name?: string; parent?: unknown }
+		const node = cur as OutlinerLike
 		if (typeof node.name === 'string') path.unshift(node.name)
 		cur = node.parent
 	}
-	if (path.length <= 1) return undefined
 	return path.join(' > ')
 }
 
@@ -36,18 +44,12 @@ function applyBreadcrumbs(): void {
 	const list = findAnimatorList()
 	if (!list) return
 
-	// uuid → Group の map を 1 回ビルド (= row ごとの linear find を回避)
-	const all = (typeof Group !== 'undefined' ? Group : undefined)?.all ?? []
-	const groupMap = new Map<string, GroupNode>()
-	for (const g of all) groupMap.set(g.uuid, g)
-
 	const rows = list.querySelectorAll<HTMLElement>('li.animator')
 	for (const row of rows) {
 		const uuid = row.getAttribute('uuid') ?? ''
 		const nameEl = row.querySelector<HTMLElement>('.timeline_animator_name')
 		if (!nameEl) continue
-		const target = groupMap.get(uuid)
-		const bc = target ? buildBreadcrumbFromTarget(target) : undefined
+		const bc = buildBreadcrumb(uuid)
 		if (bc) {
 			nameEl.title = bc
 			nameEl.setAttribute(BREADCRUMB_ATTR, '1')
