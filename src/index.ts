@@ -2,6 +2,7 @@
 // Animator panel 検索 / フィルタ / 3D 選択連動 / keyframe ジャンプの集約。
 // 大型モデル (= ボーン 100+ 等) でのアニメーション作成効率化を目的とする。
 
+import { installAbLoop } from './abLoop'
 import { installAnimatorPanelUI } from './animatorPanelUI'
 import { installAutoScroll } from './autoScroll'
 import { installBreadcrumbs } from './breadcrumb'
@@ -30,6 +31,7 @@ Plugin.register(PLUGIN_ID, {
 		cleanups.push(installBreadcrumbs())
 		cleanups.push(installKeyframeJump())
 		cleanups.push(installAutoScroll())
+		cleanups.push(installAbLoop())
 	},
 	onunload() {
 		for (const fn of cleanups) {

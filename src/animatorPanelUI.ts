@@ -24,12 +24,13 @@ declare const Timeline:
 	| undefined
 
 // filter bar 上の toggle 群の状態。 純粋なフィルタリング (= keyframesOnly / onlySelected) に加え、
-// 動作系 toggle (= autoScroll) も同じ state に乗せて UI ロジックを単純化している。
+// 動作系 toggle (= autoScroll / abLoop) も同じ state に乗せて UI ロジックを単純化している。
 export interface FilterState {
 	query: string
 	keyframesOnly: boolean
 	onlySelected: boolean
 	autoScroll: boolean
+	abLoop: boolean
 }
 
 const STYLE_ID = 'anim-ux-style'
@@ -109,6 +110,7 @@ export const filterState: FilterState = {
 	keyframesOnly: false,
 	onlySelected: false,
 	autoScroll: false,
+	abLoop: false,
 }
 
 const FILTER_DEFAULTS: FilterState = {
@@ -116,6 +118,7 @@ const FILTER_DEFAULTS: FilterState = {
 	keyframesOnly: false,
 	onlySelected: false,
 	autoScroll: false,
+	abLoop: false,
 }
 
 let installedBar: HTMLElement | undefined
@@ -156,6 +159,7 @@ function buildBar(): HTMLElement {
 		['keyframesOnly', 'filter_alt', 'Show only animators with keyframes in this animation'],
 		['onlySelected', 'link', 'Sync with 3D selection'],
 		['autoScroll', 'gps_fixed', 'Auto-scroll panel to 3D selection'],
+		['abLoop', 'loop', 'A-B loop playback (Alt+Shift+A/B set, Alt+Shift+L toggle, Alt+Shift+X clear)'],
 	]
 	for (const [key, icon, title] of toggles) {
 		const btn = document.createElement('button')
@@ -289,6 +293,7 @@ export function installAnimatorPanelUI(): () => void {
 		filterState.keyframesOnly = FILTER_DEFAULTS.keyframesOnly
 		filterState.onlySelected = FILTER_DEFAULTS.onlySelected
 		filterState.autoScroll = FILTER_DEFAULTS.autoScroll
+		filterState.abLoop = FILTER_DEFAULTS.abLoop
 
 		installedBar?.remove()
 		installedBar = undefined
