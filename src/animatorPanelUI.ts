@@ -30,7 +30,6 @@ const BAR_CLASS = 'anim-ux-bar'
 const SEARCH_CLASS = 'anim-ux-search'
 const TOGGLE_CLASS = 'anim-ux-toggle'
 
-// BB 標準の CSS 変数を流用して theme 追従させる。 element の見た目は最小限に。
 const CSS = `
 .${BAR_CLASS} {
 	display: flex;
@@ -84,11 +83,16 @@ export const filterState: FilterState = {
 	onlySelected: false,
 }
 
+const FILTER_DEFAULTS: FilterState = {
+	query: '',
+	keyframesOnly: false,
+	onlySelected: false,
+}
+
 let installedBar: HTMLElement | undefined
 let observer: MutationObserver | undefined
+let pendingRefresh = false
 
-// MutationObserver でパネル再描画を検知した時に追加で走らせる callback。
-// breadcrumb / 他の row 装飾系から登録する。
 const refreshCallbacks: Array<() => void> = []
 
 export function registerRefreshCallback(cb: () => void): () => void {
@@ -150,17 +154,6 @@ function ensureBarInPlace(): void {
 	list.prepend(installedBar)
 }
 
-function animatorHasKeyframes(uuid: string): boolean {
-	const anim = (typeof Timeline !== 'undefined' ? Timeline : undefined)?.animators.find(
-		a => a.uuid === uuid
-	)
-	if (!anim) return false
-	const pos = anim.position?.length ?? 0
-	const rot = anim.rotation?.length ?? 0
-	const scl = anim.scale?.length ?? 0
-	return pos + rot + scl > 0
-}
-
 function collectSelectedGroupUuids(): Set<string> {
 	const set = new Set<string>()
 	const all = (typeof Group !== 'undefined' ? Group : undefined)?.all
@@ -173,11 +166,23 @@ function collectSelectedGroupUuids(): Set<string> {
 
 // state を読んで全 animator row に display を当て直す。
 // search / toggles / selection sync から呼ばれる。
+// keyframesOnly 時の lookup は事前に Map をビルドして O(rows + animators) に。
 export function applyFilter(): void {
 	const list = findAnimatorList()
 	if (!list) return
 	const q = filterState.query.trim().toLowerCase()
 	const selectedUuids = filterState.onlySelected ? collectSelectedGroupUuids() : undefined
+
+	let keyframeMap: Map<string, boolean> | undefined
+	if (filterState.keyframesOnly) {
+		keyframeMap = new Map()
+		const all = (typeof Timeline !== 'undefined' ? Timeline : undefined)?.animators ?? []
+		for (const a of all) {
+			const has =
+				((a.position?.length ?? 0) + (a.rotation?.length ?? 0) + (a.scale?.length ?? 0)) > 0
+			keyframeMap.set(a.uuid, has)
+		}
+	}
 
 	const rows = list.querySelectorAll<HTMLElement>('li.animator')
 	for (const row of rows) {
@@ -187,11 +192,29 @@ export function applyFilter(): void {
 
 		let visible = true
 		if (q && !name.includes(q)) visible = false
-		if (filterState.keyframesOnly && !animatorHasKeyframes(uuid)) visible = false
+		if (keyframeMap && !keyframeMap.get(uuid)) visible = false
 		if (selectedUuids && !selectedUuids.has(uuid)) visible = false
 
 		row.style.display = visible ? '' : 'none'
 	}
+}
+
+// MutationObserver の発火連発を rAF に集約 (= 60 fps 上限)。
+function scheduleRefresh(): void {
+	if (pendingRefresh) return
+	pendingRefresh = true
+	requestAnimationFrame(() => {
+		pendingRefresh = false
+		ensureBarInPlace()
+		applyFilter()
+		for (const cb of refreshCallbacks) {
+			try {
+				cb()
+			} catch (e) {
+				console.warn('[anim_ux] refresh callback failed', e)
+			}
+		}
+	})
 }
 
 // filter bar 本体を取り出すヘルパー (= search / toggles からイベント attach 用)
@@ -203,25 +226,25 @@ export function installAnimatorPanelUI(): () => void {
 	injectStyleOnce()
 	ensureBarInPlace()
 
-	// timeline panel は Vue の再描画 / Project 切替で再生成され得る。
-	// document.body 全体を観察するが、 動作は ensureBarInPlace のべき等チェックで重複 inject を防ぐ。
-	// 再描画後の新規 row にも filter を再適用するため applyFilter も呼ぶ (= state は維持される)。
-	observer = new MutationObserver(() => {
-		ensureBarInPlace()
-		applyFilter()
-		for (const cb of refreshCallbacks) {
-			try {
-				cb()
-			} catch (e) {
-				console.warn('[anim_ux] refresh callback failed', e)
-			}
-		}
-	})
+	observer = new MutationObserver(() => scheduleRefresh())
 	observer.observe(document.body, { childList: true, subtree: true })
 
 	return () => {
 		observer?.disconnect()
 		observer = undefined
+
+		// hidden 残留を防ぐため、 全 row の display を初期化してから bar を抜く。
+		const list = findAnimatorList()
+		if (list) {
+			const rows = list.querySelectorAll<HTMLElement>('li.animator')
+			for (const row of rows) row.style.display = ''
+		}
+
+		// filter state も初期値に戻す (= disable → enable で古い state が復活しないように)
+		filterState.query = FILTER_DEFAULTS.query
+		filterState.keyframesOnly = FILTER_DEFAULTS.keyframesOnly
+		filterState.onlySelected = FILTER_DEFAULTS.onlySelected
+
 		installedBar?.remove()
 		installedBar = undefined
 		document.getElementById(STYLE_ID)?.remove()
