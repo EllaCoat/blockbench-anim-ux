@@ -26,7 +26,8 @@ function stopSelectionWatch(): void {
 // 同 panel 内の全 toggle button (= 同一 key を持つもの含む) に active class を反映。
 // MutationObserver で bar が再 inject された後でも button が新規 element になるため、
 // applyFilter() を呼ぶたびに class 状態も再描画する。
-function syncToggleVisuals(): void {
+// export で他 module (= abLoop の shortcut 経由 toggle 等) からも呼べるようにしている。
+export function syncToggleVisuals(): void {
 	const buttons = document.querySelectorAll<HTMLElement>(TOGGLE_SELECTOR)
 	for (const btn of buttons) {
 		const key = btn.dataset.key as keyof FilterState | undefined

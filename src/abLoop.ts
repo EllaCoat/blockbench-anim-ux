@@ -16,6 +16,7 @@
 //   - 視覚的な範囲マーカー (= timeline 縦線) は v0.2 では未実装、 v0.3 で追加検討
 
 import { filterState } from './animatorPanelUI'
+import { syncToggleVisuals } from './toggles'
 
 declare const Timeline:
 	| {
@@ -114,13 +115,8 @@ export function installAbLoop(): () => void {
 			condition,
 			click() {
 				filterState.abLoop = !filterState.abLoop
-				// filter bar の toggle button class を同期 (= shortcut 経由でも視覚状態を反映)
-				const buttons = document.querySelectorAll<HTMLElement>('.anim-ux-toggle')
-				for (const btn of buttons) {
-					if (btn.dataset.key === 'abLoop') {
-						btn.classList.toggle('active', filterState.abLoop)
-					}
-				}
+				// shortcut 経由でも filter bar の class 状態を反映 (= toggles.ts の共通関数を流用)
+				syncToggleVisuals()
 			},
 		})
 	)

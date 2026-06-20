@@ -2,9 +2,11 @@
 //
 // 役割 :
 //   - Panels.timeline.node 内の #timeline_body_inner を MutationObserver で監視
-//   - filter bar (= search input + toggle 2 個) を 1 回だけ inject、 unload 時に remove
+//   - filter bar (= search input + toggle 5 個 = keyframesOnly / onlySelected / autoScroll / abLoop / onionSkin)
+//     を 1 回だけ inject、 unload 時に remove
 //   - applyFilter() で全 <li class="animator"> に CSS display toggle を当てる
 //   - filter state は module level に保持し、 後続の search / toggles ファイルから書き換えて再描画
+//   - autoScroll / abLoop / onionSkin は filter ではなく動作系 toggle、 同じ state に乗せて UI を統一
 
 declare const Panels: { timeline?: { node?: HTMLElement } } | undefined
 // OutlinerNode.uuids は Group / NullObject / Locator / VanillaItemDisplay 等を含む全 outliner node の uuid → node map
