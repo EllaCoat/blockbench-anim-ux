@@ -7,6 +7,17 @@
 //   - filter state は module level に保持し、 後続の search / toggles ファイルから書き換えて再描画
 
 declare const Panels: { timeline?: { node?: HTMLElement } } | undefined
+declare const Group: { all: Array<{ uuid: string; selected: boolean }> } | undefined
+declare const Timeline:
+	| {
+			animators: Array<{
+				uuid: string
+				position?: unknown[]
+				rotation?: unknown[]
+				scale?: unknown[]
+			}>
+	  }
+	| undefined
 
 export interface FilterState {
 	query: string
@@ -127,19 +138,46 @@ function ensureBarInPlace(): void {
 	list.prepend(installedBar)
 }
 
+function animatorHasKeyframes(uuid: string): boolean {
+	const anim = (typeof Timeline !== 'undefined' ? Timeline : undefined)?.animators.find(
+		a => a.uuid === uuid
+	)
+	if (!anim) return false
+	const pos = anim.position?.length ?? 0
+	const rot = anim.rotation?.length ?? 0
+	const scl = anim.scale?.length ?? 0
+	return pos + rot + scl > 0
+}
+
+function collectSelectedGroupUuids(): Set<string> {
+	const set = new Set<string>()
+	const all = (typeof Group !== 'undefined' ? Group : undefined)?.all
+	if (!all) return set
+	for (const g of all) {
+		if (g.selected) set.add(g.uuid)
+	}
+	return set
+}
+
 // state を読んで全 animator row に display を当て直す。
-// search / toggles / selection sync から呼ばれる。 段階 1 では query のみ評価。
+// search / toggles / selection sync から呼ばれる。
 export function applyFilter(): void {
 	const list = findAnimatorList()
 	if (!list) return
 	const q = filterState.query.trim().toLowerCase()
+	const selectedUuids = filterState.onlySelected ? collectSelectedGroupUuids() : undefined
+
 	const rows = list.querySelectorAll<HTMLElement>('li.animator')
 	for (const row of rows) {
 		const nameEl = row.querySelector<HTMLElement>('.timeline_animator_name')
 		const name = nameEl?.textContent?.trim().toLowerCase() ?? ''
+		const uuid = row.getAttribute('uuid') ?? ''
+
 		let visible = true
 		if (q && !name.includes(q)) visible = false
-		// keyframesOnly / onlySelected は後段ファイルで実装、 ここでは未評価
+		if (filterState.keyframesOnly && !animatorHasKeyframes(uuid)) visible = false
+		if (selectedUuids && !selectedUuids.has(uuid)) visible = false
+
 		row.style.display = visible ? '' : 'none'
 	}
 }

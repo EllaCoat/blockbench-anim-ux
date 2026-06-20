@@ -4,6 +4,7 @@
 
 import { installAnimatorPanelUI } from './animatorPanelUI'
 import { installSearchHandler } from './search'
+import { installTogglesHandler } from './toggles'
 
 declare const Plugin: { register(id: string, opts: Record<string, unknown>): void }
 
@@ -22,6 +23,7 @@ Plugin.register(PLUGIN_ID, {
 	onload() {
 		cleanups.push(installAnimatorPanelUI())
 		cleanups.push(installSearchHandler())
+		cleanups.push(installTogglesHandler())
 		console.log(`[${PLUGIN_ID}] loaded`)
 	},
 	onunload() {
