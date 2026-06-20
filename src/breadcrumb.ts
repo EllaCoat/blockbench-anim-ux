@@ -1,13 +1,13 @@
-// blockbench-anim-ux — D: 階層インデント / パンくず保持 (= 独自 tooltip 版)
+// blockbench-anim-ux — D: 階層インデント / パンくず保持 (= CSS :hover::after 版)
 //
 // 役割 :
 //   - 各 <li class="animator"> の <span class="timeline_animator_name"> に親階層 path を data 属性で保存
-//   - hover 時に独自 floating div で表示 (= 「root > arm_L > finger_L_03」 形式)
+//   - 表示は animatorPanelUI.ts 内の CSS `:hover::after { content: attr(data-anim-ux-breadcrumb) }` で行う
 //
-// なぜ独自 tooltip にしたか :
-//   - BB の `.timeline_animator_name` は `@mousedown="dragAnimator"` で draggable 化されており、
-//     HTML 標準 title 属性による tooltip がブラウザに suppress される現象を確認 (= v0.1 実機検証)
-//   - mouseover の delegated event 経由で独自 floating div を出す方式に切り替え
+// なぜ CSS approach にしたか :
+//   - HTML `title` 属性 / JS の `mouseover` event を経由する tooltip は、 BB の draggable + 独自 mousedown 干渉で
+//     どちらも標準動作が抑制される現象を v0.1 実機検証で確認 (= title は完全 suppress、 mouseover は確認中)
+//   - CSS `:hover::after` は擬似要素を element 直下に絶対配置するため、 JS event に依存せず確実に動く
 
 import { findAnimatorList, registerRefreshCallback } from './animatorPanelUI'
 
@@ -20,7 +20,6 @@ declare const OutlinerNode:
 	| undefined
 
 const BREADCRUMB_ATTR = 'data-anim-ux-breadcrumb'
-const TOOLTIP_ID = 'anim-ux-tooltip'
 const NAME_SELECTOR = '.timeline_animator_name'
 
 function getOutlinerNode(uuid: string): OutlinerLike | undefined {
@@ -69,111 +68,11 @@ function clearAllBreadcrumbs(): void {
 	}
 }
 
-// ----- 独自 tooltip element -------------------------------------------------
-
-function ensureTooltipElement(): HTMLElement {
-	let el = document.getElementById(TOOLTIP_ID)
-	if (!el) {
-		el = document.createElement('div')
-		el.id = TOOLTIP_ID
-		el.style.cssText = [
-			'position: fixed',
-			'background: var(--color-back, #222)',
-			'color: var(--color-text, #ddd)',
-			'border: 1px solid var(--color-border, #444)',
-			'padding: 4px 8px',
-			'font-size: 12px',
-			'border-radius: 2px',
-			'z-index: 10000',
-			'pointer-events: none',
-			'display: none',
-			'max-width: 400px',
-			'word-break: break-all',
-			'box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35)',
-		].join('; ')
-		document.body.appendChild(el)
-	}
-	return el
-}
-
-function showTooltip(text: string, x: number, y: number): void {
-	const el = ensureTooltipElement()
-	el.textContent = text
-	el.style.display = 'block'
-	el.style.left = `${x + 12}px`
-	el.style.top = `${y + 16}px`
-}
-
-function hideTooltip(): void {
-	const el = document.getElementById(TOOLTIP_ID)
-	if (el) el.style.display = 'none'
-}
-
-function removeTooltipElement(): void {
-	document.getElementById(TOOLTIP_ID)?.remove()
-}
-
-// ----- event handlers (= delegated) -----------------------------------------
-
-let mouseoverCounter = 0
-function onMouseOver(e: MouseEvent): void {
-	const original = e.target as HTMLElement | null
-	const closest = original?.closest(NAME_SELECTOR) as HTMLElement | null
-	mouseoverCounter++
-	// 全 mouseover をログると console あふれるので closest が match した時だけ
-	if (closest) {
-		const bc = closest.getAttribute(BREADCRUMB_ATTR)
-		console.log(
-			`[anim_ux/tip] mouseover#${mouseoverCounter}: target="${original?.tagName}.${original?.className}" closest=yes attr="${bc}" pos=(${e.clientX},${e.clientY})`
-		)
-		if (!bc) return
-		showTooltip(bc, e.clientX, e.clientY)
-		const el = document.getElementById(TOOLTIP_ID)
-		console.log(
-			`[anim_ux/tip] showTooltip: el=${el ? 'exists' : 'NULL'} display="${el?.style.display}" text="${el?.textContent}"`
-		)
-	}
-}
-
-function onMouseMove(e: MouseEvent): void {
-	const el = document.getElementById(TOOLTIP_ID)
-	if (!el || el.style.display === 'none') return
-	const target = (e.target as HTMLElement | null)?.closest(NAME_SELECTOR) as HTMLElement | null
-	if (!target) {
-		hideTooltip()
-		return
-	}
-	el.style.left = `${e.clientX + 12}px`
-	el.style.top = `${e.clientY + 16}px`
-}
-
-function onMouseOut(e: MouseEvent): void {
-	const target = (e.target as HTMLElement | null)?.closest(NAME_SELECTOR) as HTMLElement | null
-	if (!target) return
-	hideTooltip()
-}
-
 export function installBreadcrumbs(): () => void {
 	const unregister = registerRefreshCallback(applyBreadcrumbs)
 	applyBreadcrumbs()
-	// 初期化時に tooltip element を一回作って、 存在を確認
-	ensureTooltipElement()
-	const initEl = document.getElementById(TOOLTIP_ID)
-	console.log(
-		`[anim_ux/tip] install: tooltip element ${initEl ? 'created' : 'FAILED'} in body=${document.body.contains(initEl!)}`
-	)
-
-	document.addEventListener('mouseover', onMouseOver, true)
-	document.addEventListener('mousemove', onMouseMove, true)
-	document.addEventListener('mouseout', onMouseOut, true)
-
 	return () => {
 		unregister()
-		document.removeEventListener('mouseover', onMouseOver, true)
-		document.removeEventListener('mousemove', onMouseMove, true)
-		document.removeEventListener('mouseout', onMouseOut, true)
-		hideTooltip()
-		removeTooltipElement()
 		clearAllBreadcrumbs()
 	}
 }

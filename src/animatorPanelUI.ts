@@ -75,6 +75,28 @@ const CSS = `
 .${TOGGLE_CLASS} i {
 	font-size: 16px;
 }
+
+/* breadcrumb tooltip — CSS :hover::after で擬似要素表示 (= JS event 経由は BB の draggable に干渉される) */
+.timeline_animator_name[data-anim-ux-breadcrumb] {
+	position: relative;
+}
+.timeline_animator_name[data-anim-ux-breadcrumb]:hover::after {
+	content: attr(data-anim-ux-breadcrumb);
+	position: absolute;
+	left: 0;
+	top: 100%;
+	margin-top: 2px;
+	background: var(--color-back);
+	color: var(--color-text);
+	border: 1px solid var(--color-border);
+	padding: 4px 8px;
+	font-size: 12px;
+	border-radius: 2px;
+	z-index: 10000;
+	pointer-events: none;
+	white-space: nowrap;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
 `
 
 export const filterState: FilterState = {
