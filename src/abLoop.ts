@@ -47,6 +47,10 @@ const MARKER_A_CLASS = 'anim-ux-ab-marker-a'
 const MARKER_B_CLASS = 'anim-ux-ab-marker-b'
 // 縦線の色は Onion Skin と同系統 (= past 青 / future 橙 と紛らわしくないように彩度多少落とす)。
 // A = 開始 (= 緑系)、 B = 終了 (= 赤系) で「開始/終了」 のメタファに寄せる。
+// 注 : CSS で display:none を default にして style.display='' で上書きしようとすると、
+// inline style が空になった時に CSS の display:none が再評価で復活する古典的な罠。
+// なので CSS には display 指定を入れず、 JS 側で常に 'block' / 'none' を明示する。
+// z-index は li.animator (= 5、 panels.css:1759) より上にしないと隠れる、 100 で十分余裕。
 const MARKER_CSS = `
 .${MARKER_A_CLASS}, .${MARKER_B_CLASS} {
 	position: absolute;
@@ -54,8 +58,7 @@ const MARKER_CSS = `
 	bottom: 0;
 	width: 2px;
 	pointer-events: none;
-	z-index: 4;
-	display: none;
+	z-index: 100;
 }
 .${MARKER_A_CLASS} { background-color: #66cc66; box-shadow: 0 0 4px rgba(102, 204, 102, 0.6); }
 .${MARKER_B_CLASS} { background-color: #cc6666; box-shadow: 0 0 4px rgba(204, 102, 102, 0.6); }
@@ -171,6 +174,7 @@ function ensureMarkers(): void {
 
 // loopStart / loopEnd の現値を読んで left を計算 + display を on/off。
 // 値計算式は BB keyframe と完全一致 (= head_width + time * size + 8)、 これで scroll/zoom 両方追従。
+// display は 'block' を明示 (= '' にすると CSS class の display:none 等が再評価で復活する罠)。
 function updateMarkers(): void {
 	if (!markerA && !markerB) return
 	const size = getTimelineSize()
@@ -179,7 +183,7 @@ function updateMarkers(): void {
 		if (loopStart === undefined) {
 			markerA.style.display = 'none'
 		} else {
-			markerA.style.display = ''
+			markerA.style.display = 'block'
 			markerA.style.left = `${headWidth + loopStart * size + 8}px`
 		}
 	}
@@ -187,7 +191,7 @@ function updateMarkers(): void {
 		if (loopEnd === undefined) {
 			markerB.style.display = 'none'
 		} else {
-			markerB.style.display = ''
+			markerB.style.display = 'block'
 			markerB.style.left = `${headWidth + loopEnd * size + 8}px`
 		}
 	}
