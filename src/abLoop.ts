@@ -15,7 +15,9 @@
 //     ON 中の編集 (= Timeline.playing=false) でも rAF は回り続けるが、 tick 内で
 //     timeline.playing 判定があるため巻き戻しは発生しない (= 計算は noop で 1 frame 数 µs)。
 //   - A > B の逆向き範囲は不正扱いで巻き戻さない (= ユーザーミスを silent fail させて事故を防ぐ)
-//   - 視覚的な範囲マーカー (= timeline 縦線) は v0.2 では未実装、 v0.3 で追加検討
+//   - v0.3 で視覚的な縦線マーカーを追加 (= #timeline_body_inner 内に absolute 配置で scroll 自動追従、
+//     zoom 追従用に A/B のいずれかが set されてる間だけ別 rAF を回す = idle 時 0 cost)
+//     left = head_width + time * size + 8 (= BB の keyframe 配置式と完全一致、 timeline.js:1775 参照)
 
 import { filterState, registerRefreshCallback } from './animatorPanelUI'
 import { syncToggleVisuals } from './toggles'
@@ -25,6 +27,7 @@ declare const Timeline:
 			time: number
 			setTime(t: number): void
 			playing?: boolean
+			vue?: { _data?: { size?: number; head_width?: number }; size?: number; head_width?: number }
 	  }
 	| undefined
 declare const Animation: { selected?: { snapping?: number } } | undefined
@@ -34,6 +37,29 @@ declare const Keybind: new (opts: Record<string, unknown>) => unknown
 let loopStart: number | undefined
 let loopEnd: number | undefined
 let watchHandle: number | undefined
+let markerWatchHandle: number | undefined
+let markerA: HTMLElement | undefined
+let markerB: HTMLElement | undefined
+let markerStyle: HTMLStyleElement | undefined
+
+const MARKER_STYLE_ID = 'anim-ux-ab-marker-style'
+const MARKER_A_CLASS = 'anim-ux-ab-marker-a'
+const MARKER_B_CLASS = 'anim-ux-ab-marker-b'
+// 縦線の色は Onion Skin と同系統 (= past 青 / future 橙 と紛らわしくないように彩度多少落とす)。
+// A = 開始 (= 緑系)、 B = 終了 (= 赤系) で「開始/終了」 のメタファに寄せる。
+const MARKER_CSS = `
+.${MARKER_A_CLASS}, .${MARKER_B_CLASS} {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	width: 2px;
+	pointer-events: none;
+	z-index: 4;
+	display: none;
+}
+.${MARKER_A_CLASS} { background-color: #66cc66; box-shadow: 0 0 4px rgba(102, 204, 102, 0.6); }
+.${MARKER_B_CLASS} { background-color: #cc6666; box-shadow: 0 0 4px rgba(204, 102, 102, 0.6); }
+`
 
 // BB 正式仕様の condition object 形式 (= `Animate` モード時のみ発火)。
 // v0.2 初版は function 渡し + Prop.active_panel === 'timeline' 判定だったが、
@@ -103,6 +129,98 @@ export function syncAbLoopWatch(): void {
 	else stopWatch()
 }
 
+// Timeline.vue の動的データから size (= px/sec) と head_width を取得。
+// `_data` 経路 (= Vue 2 internal) と素直な経路を順に試して、 BB version 差を吸収。
+function getTimelineSize(): number {
+	const v = (typeof Timeline !== 'undefined' ? Timeline : undefined)?.vue
+	return v?._data?.size ?? v?.size ?? 100
+}
+function getTimelineHeadWidth(): number {
+	const v = (typeof Timeline !== 'undefined' ? Timeline : undefined)?.vue
+	return v?._data?.head_width ?? v?.head_width ?? 0
+}
+
+// CSS を 1 回だけ inject (= plugin unload で remove)。 marker 用のスタイル。
+function ensureMarkerStyle(): void {
+	if (markerStyle) return
+	const style = document.createElement('style')
+	style.id = MARKER_STYLE_ID
+	style.textContent = MARKER_CSS
+	document.head.appendChild(style)
+	markerStyle = style
+}
+
+// #timeline_body_inner 内に A / B 縦線 div を attach (= 既に同じ親にあれば再利用)。
+// 親が再 render で消える / 切替えられたケースを毎呼出 で吸収 (= filter bar と同じ思想)。
+function ensureMarkers(): void {
+	const inner = document.getElementById('timeline_body_inner')
+	if (!inner) return
+	if (!markerA || markerA.parentElement !== inner) {
+		if (markerA?.parentElement) markerA.remove()
+		markerA = document.createElement('div')
+		markerA.className = MARKER_A_CLASS
+		inner.appendChild(markerA)
+	}
+	if (!markerB || markerB.parentElement !== inner) {
+		if (markerB?.parentElement) markerB.remove()
+		markerB = document.createElement('div')
+		markerB.className = MARKER_B_CLASS
+		inner.appendChild(markerB)
+	}
+}
+
+// loopStart / loopEnd の現値を読んで left を計算 + display を on/off。
+// 値計算式は BB keyframe と完全一致 (= head_width + time * size + 8)、 これで scroll/zoom 両方追従。
+function updateMarkers(): void {
+	if (!markerA && !markerB) return
+	const size = getTimelineSize()
+	const headWidth = getTimelineHeadWidth()
+	if (markerA) {
+		if (loopStart === undefined) {
+			markerA.style.display = 'none'
+		} else {
+			markerA.style.display = ''
+			markerA.style.left = `${headWidth + loopStart * size + 8}px`
+		}
+	}
+	if (markerB) {
+		if (loopEnd === undefined) {
+			markerB.style.display = 'none'
+		} else {
+			markerB.style.display = ''
+			markerB.style.left = `${headWidth + loopEnd * size + 8}px`
+		}
+	}
+}
+
+// A or B が set されてる間だけ rAF を回して zoom 追従。 何も set されてないときは停止 (= idle 0 cost)。
+// scroll 追従は inner の absolute 配置で自動 = ここでは不要、 zoom (= size 変動) のみ rAF で拾う。
+function tickMarkers(): void {
+	ensureMarkers()
+	updateMarkers()
+	if (loopStart !== undefined || loopEnd !== undefined) {
+		markerWatchHandle = requestAnimationFrame(tickMarkers)
+	} else {
+		markerWatchHandle = undefined
+	}
+}
+
+function syncMarkerWatch(): void {
+	if (loopStart !== undefined || loopEnd !== undefined) {
+		if (markerWatchHandle === undefined) {
+			markerWatchHandle = requestAnimationFrame(tickMarkers)
+		}
+	} else {
+		if (markerWatchHandle !== undefined) {
+			cancelAnimationFrame(markerWatchHandle)
+			markerWatchHandle = undefined
+		}
+		// 即時に線を隠す (= 次 tick まで待たない)
+		if (markerA) markerA.style.display = 'none'
+		if (markerB) markerB.style.display = 'none'
+	}
+}
+
 let actions: Array<{ delete(): void }> = []
 
 export function installAbLoop(): () => void {
@@ -120,6 +238,7 @@ export function installAbLoop(): () => void {
 				const timeline = typeof Timeline !== 'undefined' ? Timeline : undefined
 				if (timeline) loopStart = timeline.time
 				updateAbLoopStatus()
+				syncMarkerWatch()
 			},
 		})
 	)
@@ -134,6 +253,7 @@ export function installAbLoop(): () => void {
 				const timeline = typeof Timeline !== 'undefined' ? Timeline : undefined
 				if (timeline) loopEnd = timeline.time
 				updateAbLoopStatus()
+				syncMarkerWatch()
 			},
 		})
 	)
@@ -164,15 +284,24 @@ export function installAbLoop(): () => void {
 				loopStart = undefined
 				loopEnd = undefined
 				updateAbLoopStatus()
+				syncMarkerWatch()
 			},
 		})
 	)
 
-	// MutationObserver で bar が再 inject された後の状態追従 (= 新しい span に再描画)
-	const unregisterRefresh = registerRefreshCallback(updateAbLoopStatus)
+	// MutationObserver で bar が再 inject された後の状態追従 (= 新しい span に再描画)。
+	// marker も ensureMarkers() で同じく再 attach 経路を持つので、 refresh callback で 1 回叩く。
+	const unregisterRefresh = registerRefreshCallback(() => {
+		updateAbLoopStatus()
+		ensureMarkers()
+		updateMarkers()
+	})
 
-	// plugin load 直後は abLoop=false なので watch は開始しない (= idle cost ゼロ)。
-	// toggle / shortcut で ON にされた時点で syncAbLoopWatch() が走って start する。
+	// marker CSS を 1 回 inject (= timeline_body_inner への attach 自体は ensureMarkers() で遅延作業)
+	ensureMarkerStyle()
+
+	// plugin load 直後は abLoop=false かつ loopStart/End=undefined なので、 rAF は両方とも停止状態。
+	// toggle / shortcut で ON にされた時点で syncAbLoopWatch() / syncMarkerWatch() が走って start する。
 
 	return () => {
 		unregisterRefresh()
@@ -185,6 +314,16 @@ export function installAbLoop(): () => void {
 		}
 		actions = []
 		stopWatch()
+		if (markerWatchHandle !== undefined) {
+			cancelAnimationFrame(markerWatchHandle)
+			markerWatchHandle = undefined
+		}
+		markerA?.remove()
+		markerA = undefined
+		markerB?.remove()
+		markerB = undefined
+		markerStyle?.remove()
+		markerStyle = undefined
 		loopStart = undefined
 		loopEnd = undefined
 	}
