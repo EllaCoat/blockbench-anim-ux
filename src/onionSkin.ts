@@ -161,8 +161,10 @@ function applyPoseAt(time: number): void {
 function withPoseAt(time: number, cb: () => void): void {
 	if (!Timeline) return
 	const lastTime = Timeline.time
-	applyPoseAt(time)
+	// applyPoseAt(time) を try 内に入れて、 stackAnimations 等の途中 throw でも
+	// finally 復元が確実に走るようにする (= playhead / 実 rig 汚染防止)。
 	try {
+		applyPoseAt(time)
 		cb()
 	} finally {
 		applyPoseAt(lastTime)
@@ -171,11 +173,17 @@ function withPoseAt(time: number, cb: () => void): void {
 
 function rebuildGhosts(): void {
 	if (busy) return
-	if (!filterState.onionSkin) return
-	if (!Modes?.animate) return
-	if (!Animation?.selected) return
+	// OFF / 編集モード外 / Animation 未選択 のいずれかなら、 既存 ghost を消してから抜ける。
+	// (= 早期 return だけだと前回 ghost が scene に残ってメモリも保持されたままになる)
+	if (!filterState.onionSkin || !Modes?.animate || !Animation?.selected) {
+		clearGhosts()
+		return
+	}
 	const group = Group?.selected?.[0] ?? Group?.first_selected
-	if (!group?.mesh) return
+	if (!group?.mesh) {
+		clearGhosts()
+		return
+	}
 	busy = true
 	try {
 		clearGhosts()
@@ -208,7 +216,19 @@ function onModeChange(): void {
 	clearGhosts()
 }
 
+// toggle 押下時の即時反映用 (= toggles.ts から呼ぶ、 event 待ちのラグを避ける)
+export function forceRefreshOnionSkin(): void {
+	rebuildGhosts()
+}
+
 export function installOnionSkin(): () => void {
+	// 防御的ガード : 想定外の BB build で THREE が global に居ない場合は plugin 全体を巻き込まない。
+	// (= BB 標準 + AJ 環境では `Animator.onion_skin_object = new THREE.Object3D()` が機能してるので
+	//   通常はここで弾かれない)
+	if (typeof THREE === 'undefined') {
+		console.warn('[anim_ux] THREE not available, onion skin disabled')
+		return () => {}
+	}
 	Blockbench?.on('display_animation_frame', onFrame)
 	Blockbench?.on('update_selection', onSelection)
 	Blockbench?.on('select_mode', onModeChange)

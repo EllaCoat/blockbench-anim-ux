@@ -5,6 +5,7 @@
 // (= 選択変化検知は selectionWatch.ts に共通化済 = v0.2 で E 機能とも共有)
 
 import { applyFilter, filterState, type FilterState } from './animatorPanelUI'
+import { forceRefreshOnionSkin } from './onionSkin'
 import { addSelectionListener } from './selectionWatch'
 
 const TOGGLE_SELECTOR = '.anim-ux-toggle'
@@ -52,6 +53,10 @@ export function installTogglesHandler(): () => void {
 		if (key === 'onlySelected') {
 			if (next) startSelectionWatch()
 			else stopSelectionWatch()
+		}
+		if (key === 'onionSkin') {
+			// toggle OFF 時に ghost を即消す / ON 時に即ビルドする (= 次の event 発火待ちのラグ回避)
+			forceRefreshOnionSkin()
 		}
 
 		syncToggleVisuals()
