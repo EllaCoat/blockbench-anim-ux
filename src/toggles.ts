@@ -8,7 +8,7 @@ import { applyFilter, filterState, type FilterState } from './animatorPanelUI'
 import { addSelectionListener } from './selectionWatch'
 
 const TOGGLE_SELECTOR = '.anim-ux-toggle'
-const TOGGLE_KEYS: Array<keyof FilterState> = ['keyframesOnly', 'onlySelected', 'autoScroll', 'abLoop']
+const TOGGLE_KEYS: Array<keyof FilterState> = ['keyframesOnly', 'onlySelected', 'autoScroll', 'abLoop', 'onionSkin']
 
 let unsubscribeSelection: (() => void) | undefined
 
@@ -47,6 +47,7 @@ export function installTogglesHandler(): () => void {
 		else if (key === 'onlySelected') filterState.onlySelected = next
 		else if (key === 'autoScroll') filterState.autoScroll = next
 		else if (key === 'abLoop') filterState.abLoop = next
+		else if (key === 'onionSkin') filterState.onionSkin = next
 
 		if (key === 'onlySelected') {
 			if (next) startSelectionWatch()

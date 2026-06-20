@@ -7,6 +7,7 @@ import { installAnimatorPanelUI } from './animatorPanelUI'
 import { installAutoScroll } from './autoScroll'
 import { installBreadcrumbs } from './breadcrumb'
 import { installKeyframeJump } from './keyframeJump'
+import { installOnionSkin } from './onionSkin'
 import { installSearchHandler } from './search'
 import { installTogglesHandler } from './toggles'
 
@@ -32,6 +33,7 @@ Plugin.register(PLUGIN_ID, {
 		cleanups.push(installKeyframeJump())
 		cleanups.push(installAutoScroll())
 		cleanups.push(installAbLoop())
+		cleanups.push(installOnionSkin())
 	},
 	onunload() {
 		for (const fn of cleanups) {
