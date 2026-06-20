@@ -42,22 +42,48 @@ function buildBreadcrumb(uuid: string): string | undefined {
 
 function applyBreadcrumbs(): void {
 	const list = findAnimatorList()
-	if (!list) return
+	if (!list) {
+		console.log('[anim_ux/bc] applyBreadcrumbs: no list')
+		return
+	}
 
 	const rows = list.querySelectorAll<HTMLElement>('li.animator')
+	const uuidsObj = (typeof OutlinerNode !== 'undefined' ? OutlinerNode : undefined)?.uuids
+	const totalUuids = uuidsObj ? Object.keys(uuidsObj).length : 'undefined'
+	console.log(`[anim_ux/bc] apply: rows=${rows.length} OutlinerNode.uuids=${totalUuids}`)
+
+	let applied = 0
 	for (const row of rows) {
 		const uuid = row.getAttribute('uuid') ?? ''
 		const nameEl = row.querySelector<HTMLElement>('.timeline_animator_name')
 		if (!nameEl) continue
+		const target = getOutlinerNode(uuid)
 		const bc = buildBreadcrumb(uuid)
 		if (bc) {
 			nameEl.title = bc
 			nameEl.setAttribute(BREADCRUMB_ATTR, '1')
+			applied++
+			if (rows.length < 20) {
+				const setVal = bc
+				setTimeout(() => {
+					if (nameEl.title !== setVal) {
+						console.log(
+							`[anim_ux/bc] title overwritten on uuid=${uuid.slice(0, 8)}: "${setVal}" → "${nameEl.title}"`
+						)
+					}
+				}, 100)
+			}
 		} else if (nameEl.getAttribute(BREADCRUMB_ATTR) === '1') {
 			nameEl.removeAttribute('title')
 			nameEl.removeAttribute(BREADCRUMB_ATTR)
 		}
+		if (rows.length < 20) {
+			console.log(
+				`[anim_ux/bc]   uuid=${uuid.slice(0, 8)} target=${target ? 'yes' : 'no'} name="${target?.name}" parent=${typeof target?.parent} bc="${bc}"`
+			)
+		}
 	}
+	console.log(`[anim_ux/bc] applied=${applied}/${rows.length}`)
 }
 
 function clearAllBreadcrumbs(): void {
