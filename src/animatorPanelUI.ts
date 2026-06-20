@@ -91,7 +91,7 @@ const FILTER_DEFAULTS: FilterState = {
 
 let installedBar: HTMLElement | undefined
 let observer: MutationObserver | undefined
-let pendingRefresh = false
+let pendingRefreshHandle: number | undefined
 
 const refreshCallbacks: Array<() => void> = []
 
@@ -200,11 +200,12 @@ export function applyFilter(): void {
 }
 
 // MutationObserver の発火連発を rAF に集約 (= 60 fps 上限)。
+// handle を保持して cleanup 時に cancelAnimationFrame できるようにする
+// (= unload 後に queued frame が走って bar を復活させるのを防ぐ)。
 function scheduleRefresh(): void {
-	if (pendingRefresh) return
-	pendingRefresh = true
-	requestAnimationFrame(() => {
-		pendingRefresh = false
+	if (pendingRefreshHandle !== undefined) return
+	pendingRefreshHandle = requestAnimationFrame(() => {
+		pendingRefreshHandle = undefined
 		ensureBarInPlace()
 		applyFilter()
 		for (const cb of refreshCallbacks) {
@@ -232,6 +233,12 @@ export function installAnimatorPanelUI(): () => void {
 	return () => {
 		observer?.disconnect()
 		observer = undefined
+
+		// queued rAF を確実に止める (= cleanup 後に bar / 装飾が復活するのを防ぐ)
+		if (pendingRefreshHandle !== undefined) {
+			cancelAnimationFrame(pendingRefreshHandle)
+			pendingRefreshHandle = undefined
+		}
 
 		// hidden 残留を防ぐため、 全 row の display を初期化してから bar を抜く。
 		const list = findAnimatorList()
