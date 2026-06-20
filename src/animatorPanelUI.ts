@@ -239,11 +239,6 @@ function scheduleRefresh(): void {
 	})
 }
 
-// filter bar 本体を取り出すヘルパー (= search / toggles からイベント attach 用)
-export function getInstalledBar(): HTMLElement | undefined {
-	return installedBar
-}
-
 export function installAnimatorPanelUI(): () => void {
 	injectStyleOnce()
 	ensureBarInPlace()

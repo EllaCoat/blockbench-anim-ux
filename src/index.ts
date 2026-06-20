@@ -28,7 +28,6 @@ Plugin.register(PLUGIN_ID, {
 		cleanups.push(installTogglesHandler())
 		cleanups.push(installBreadcrumbs())
 		cleanups.push(installKeyframeJump())
-		console.log(`[${PLUGIN_ID}] loaded`)
 	},
 	onunload() {
 		for (const fn of cleanups) {
@@ -39,6 +38,5 @@ Plugin.register(PLUGIN_ID, {
 			}
 		}
 		cleanups = []
-		console.log(`[${PLUGIN_ID}] unloaded`)
 	},
 })
