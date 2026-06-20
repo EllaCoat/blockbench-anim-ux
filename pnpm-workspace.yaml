@@ -1,0 +1,4 @@
+# pnpm 設定 (= pnpm 11+ で `package.json` の `pnpm` field が廃止されたため、 こちらで管理)
+# esbuild の build script (= postinstall) は global の strictDepBuilds に弾かれるため allow 登録。
+allowBuilds:
+  esbuild: true

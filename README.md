@@ -16,9 +16,9 @@ and Adobe After Effects (Shy / property-based filtering).
 ## Build
 
 ```bash
-npm install
-npm run build       # production build (minified)
-npm run dev         # dev build with inline sourcemap
+pnpm install
+pnpm build       # production build (minified)
+pnpm dev         # dev build with inline sourcemap
 ```
 
 Output: `dist/anim_ux.js`
