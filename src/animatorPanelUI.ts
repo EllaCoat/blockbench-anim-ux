@@ -87,6 +87,18 @@ export const filterState: FilterState = {
 let installedBar: HTMLElement | undefined
 let observer: MutationObserver | undefined
 
+// MutationObserver でパネル再描画を検知した時に追加で走らせる callback。
+// breadcrumb / 他の row 装飾系から登録する。
+const refreshCallbacks: Array<() => void> = []
+
+export function registerRefreshCallback(cb: () => void): () => void {
+	refreshCallbacks.push(cb)
+	return () => {
+		const i = refreshCallbacks.indexOf(cb)
+		if (i >= 0) refreshCallbacks.splice(i, 1)
+	}
+}
+
 function injectStyleOnce(): void {
 	if (document.getElementById(STYLE_ID)) return
 	const style = document.createElement('style')
@@ -197,6 +209,13 @@ export function installAnimatorPanelUI(): () => void {
 	observer = new MutationObserver(() => {
 		ensureBarInPlace()
 		applyFilter()
+		for (const cb of refreshCallbacks) {
+			try {
+				cb()
+			} catch (e) {
+				console.warn('[anim_ux] refresh callback failed', e)
+			}
+		}
 	})
 	observer.observe(document.body, { childList: true, subtree: true })
 
