@@ -115,12 +115,24 @@ function removeTooltipElement(): void {
 
 // ----- event handlers (= delegated) -----------------------------------------
 
+let mouseoverCounter = 0
 function onMouseOver(e: MouseEvent): void {
-	const target = (e.target as HTMLElement | null)?.closest(NAME_SELECTOR) as HTMLElement | null
-	if (!target) return
-	const bc = target.getAttribute(BREADCRUMB_ATTR)
-	if (!bc) return
-	showTooltip(bc, e.clientX, e.clientY)
+	const original = e.target as HTMLElement | null
+	const closest = original?.closest(NAME_SELECTOR) as HTMLElement | null
+	mouseoverCounter++
+	// 全 mouseover をログると console あふれるので closest が match した時だけ
+	if (closest) {
+		const bc = closest.getAttribute(BREADCRUMB_ATTR)
+		console.log(
+			`[anim_ux/tip] mouseover#${mouseoverCounter}: target="${original?.tagName}.${original?.className}" closest=yes attr="${bc}" pos=(${e.clientX},${e.clientY})`
+		)
+		if (!bc) return
+		showTooltip(bc, e.clientX, e.clientY)
+		const el = document.getElementById(TOOLTIP_ID)
+		console.log(
+			`[anim_ux/tip] showTooltip: el=${el ? 'exists' : 'NULL'} display="${el?.style.display}" text="${el?.textContent}"`
+		)
+	}
 }
 
 function onMouseMove(e: MouseEvent): void {
@@ -144,6 +156,12 @@ function onMouseOut(e: MouseEvent): void {
 export function installBreadcrumbs(): () => void {
 	const unregister = registerRefreshCallback(applyBreadcrumbs)
 	applyBreadcrumbs()
+	// 初期化時に tooltip element を一回作って、 存在を確認
+	ensureTooltipElement()
+	const initEl = document.getElementById(TOOLTIP_ID)
+	console.log(
+		`[anim_ux/tip] install: tooltip element ${initEl ? 'created' : 'FAILED'} in body=${document.body.contains(initEl!)}`
+	)
 
 	document.addEventListener('mouseover', onMouseOver, true)
 	document.addEventListener('mousemove', onMouseMove, true)
