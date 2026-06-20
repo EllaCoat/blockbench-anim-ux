@@ -76,9 +76,17 @@ const CSS = `
 	font-size: 16px;
 }
 
-/* breadcrumb tooltip — CSS :hover::after で擬似要素表示 (= JS event 経由は BB の draggable に干渉される) */
+/* breadcrumb tooltip — CSS :hover::after で擬似要素表示
+   BB の panels.css 内 ".channel_head span.timeline_animator_name { pointer-events: none; }"
+   が hover event 自体を全て無効化していたので、 pointer-events を auto で復活させる。
+   さらに span 自身 + .channel_head 親の overflow も visible に上書き (= ::after が clip されないように)。 */
+.channel_head:has(> .timeline_animator_name[data-anim-ux-breadcrumb]) {
+	overflow: visible !important;
+}
 .timeline_animator_name[data-anim-ux-breadcrumb] {
 	position: relative;
+	pointer-events: auto !important;
+	overflow: visible !important;
 }
 .timeline_animator_name[data-anim-ux-breadcrumb]:hover::after {
 	content: attr(data-anim-ux-breadcrumb);
