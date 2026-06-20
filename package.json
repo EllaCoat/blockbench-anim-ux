@@ -1,0 +1,19 @@
+{
+  "name": "blockbench-anim-ux",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Blockbench plugin: animator panel search, key-only filter, 3D-selection sync, and keyframe-jump shortcuts for animating models with many bones.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --dev"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EllaCoat/blockbench-anim-ux.git"
+  }
+}
