@@ -96,7 +96,7 @@ const CSS = `
 	pointer-events: auto !important;
 }
 
-/* A-B loop status — filter bar 右端に「A: 1.23s B: 2.45s」 を muted text で表示。
+/* A-B loop status — filter bar 右端に「A:0f B:20f」 を muted text で frame 表記表示。
    loopStart / loopEnd が undefined のときは "—" (= ダッシュ) を表示。 abLoop.ts 側で更新。 */
 .${AB_STATUS_CLASS} {
 	font-size: 11px;
@@ -174,7 +174,7 @@ function buildBar(): HTMLElement {
 	}
 
 	// A-B loop の current state 表示用 span (= 内容は abLoop.ts 側から更新)。
-	// 最初は "—" のダッシュ表示、 set されたら "A: 1.23s B: 2.45s" 形式に書き換わる。
+	// 最初は "—" のダッシュ表示、 set されたら "A:0f B:20f" 形式 (= frame 後置) に書き換わる。
 	const abStatus = document.createElement('span')
 	abStatus.className = AB_STATUS_CLASS
 	abStatus.textContent = '—'

@@ -8,8 +8,9 @@
 // 経緯 :
 //   - BB の select 経路は複数 (= outliner click / 3D view click / select_all action 等) で
 //     個別 patch では取りこぼす。 v0.1 の C (onlySelected) は toggles.ts 内で
-//     独自の rAF polling を持ってた。 v0.2 で E (autoScroll) も同じ polling が必要に
-//     なったため共通化。
+//     独自の rAF polling を持ってた。 v0.2 で複数 listener 共有の必要が出たため共通化
+//     (= v0.2 で同 polling を共有する予定だった E autoScroll は BB 既存機能と重複につき撤退、
+//        現状の購読者は onlySelected のみ。 module は将来の listener 追加に備えて残置)。
 //   - Group.all だと AJ 拡張型 (= NullObject / Locator / VanillaItemDisplay) が
 //     拾えないので OutlinerNode.uuids 経由で全 outliner node を走査する。
 

@@ -129,7 +129,12 @@ function cloneSubtreeAtCurrentPose(group: NonNullable<NonNullable<typeof Group>[
 	group.forEachChild((node) => {
 		const src = node.mesh as MeshLike | undefined
 		if (!src?.geometry || node.visibility === false) return
-		const geomClone = (src.geometry as { clone(): unknown }).clone()
+		// geometry.clone() の存在を runtime 検査 : AJ 拡張型や独自 mesh で `clone` を
+		// 持たない object が来た場合に毎 rebuild で throw + catch → ghost 消滅、
+		// を silent skip に変えて他 node の ghost 生成を継続する。
+		const geom = src.geometry as { clone?: () => unknown }
+		if (typeof geom.clone !== 'function') return
+		const geomClone = geom.clone()
 		const copy = new (THREE.Mesh as new (g: unknown, m: unknown) => Record<string, unknown>)(geomClone, makeGhostMaterial(color))
 		copy.name = `${node.uuid}_ghost`
 		copy.no_export = true
@@ -141,9 +146,9 @@ function cloneSubtreeAtCurrentPose(group: NonNullable<NonNullable<typeof Group>[
 		const tmpV2 = new (THREE.Vector3 as new () => unknown)()
 		// Three.js の Object3D.position / quaternion / scale は内部固定の Vector3/Quaternion で、
 		// 別 instance を直接 assign すると Object3D 側の matrix 計算に反映されない (= 描画位置が更新されない)。
-		// さらに tmpV1/tmpQ/tmpV2 を past/future で使い回してるため、 直接 assign すると future build 時に
-		// past の position が future の値に上書きされる (= 両 ghost が同位置に表示される)。
-		// .copy() で「値だけ」 を内部 instance に書き込むのが正しい経路。
+		// v0.2 初版は `copy.position = src.getWorldPosition(tmpV1)` の直接 assign で参照バグを抱えていた
+		// (= past/future ghost が同位置に重なる、 オレンジしか見えなくなる)。 現在は .copy() で
+		// 「値だけ」 を内部 instance に書き込む経路に修正済。
 		;(copy.position as { copy(v: unknown): void }).copy(src.getWorldPosition(tmpV1))
 		;(copy.quaternion as { copy(v: unknown): void }).copy(src.getWorldQuaternion(tmpQ))
 		;(copy.scale as { copy(v: unknown): void }).copy(src.getWorldScale(tmpV2))
@@ -218,7 +223,14 @@ function onSelection(): void {
 }
 
 function onModeChange(): void {
-	clearGhosts()
+	// project reset / mode 切替で Canvas.scene が差し替わる可能性に備えて、
+	// ghost subtree の dispose だけでなく ghostRoot 自体も scene から外して破棄する。
+	// 次の rebuild で ensureRoot() が新 scene 上で再生成する。
+	if (ghostRoot) {
+		Canvas?.scene?.remove(ghostRoot)
+		disposeObject(ghostRoot)
+		ghostRoot = undefined
+	}
 }
 
 // toggle 押下時の即時反映用 (= toggles.ts から呼ぶ、 event 待ちのラグを避ける)

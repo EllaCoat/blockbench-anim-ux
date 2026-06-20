@@ -2,7 +2,7 @@
 //
 // filter bar 内の <button.anim-ux-toggle> 2 個に対するクリックを delegated に listen。
 // onlySelected = true の間だけ selectionWatch に listener を 1 本登録して applyFilter を再発火する。
-// (= 選択変化検知は selectionWatch.ts に共通化済 = v0.2 で E 機能とも共有)
+// (= 選択変化検知は selectionWatch.ts に共通化済、 現状の購読者はここのみ)
 
 import { applyFilter, filterState, type FilterState } from './animatorPanelUI'
 import { forceRefreshOnionSkin } from './onionSkin'
