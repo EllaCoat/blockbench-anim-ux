@@ -4,7 +4,6 @@
 
 import { installAbLoop } from './abLoop'
 import { installAnimatorPanelUI } from './animatorPanelUI'
-import { installAutoScroll } from './autoScroll'
 import { installBreadcrumbs } from './breadcrumb'
 import { installKeyframeJump } from './keyframeJump'
 import { installOnionSkin } from './onionSkin'
@@ -31,7 +30,6 @@ Plugin.register(PLUGIN_ID, {
 		cleanups.push(installTogglesHandler())
 		cleanups.push(installBreadcrumbs())
 		cleanups.push(installKeyframeJump())
-		cleanups.push(installAutoScroll())
 		cleanups.push(installAbLoop())
 		cleanups.push(installOnionSkin())
 	},

@@ -2,11 +2,11 @@
 //
 // 役割 :
 //   - Panels.timeline.node 内の #timeline_body_inner を MutationObserver で監視
-//   - filter bar (= search input + toggle 5 個 = keyframesOnly / onlySelected / autoScroll / abLoop / onionSkin)
+//   - filter bar (= search input + toggle 4 個 = keyframesOnly / onlySelected / abLoop / onionSkin)
 //     を 1 回だけ inject、 unload 時に remove
 //   - applyFilter() で全 <li class="animator"> に CSS display toggle を当てる
 //   - filter state は module level に保持し、 後続の search / toggles ファイルから書き換えて再描画
-//   - autoScroll / abLoop / onionSkin は filter ではなく動作系 toggle、 同じ state に乗せて UI を統一
+//   - abLoop / onionSkin は filter ではなく動作系 toggle、 同じ state に乗せて UI を統一
 
 declare const Panels: { timeline?: { node?: HTMLElement } } | undefined
 // OutlinerNode.uuids は Group / NullObject / Locator / VanillaItemDisplay 等を含む全 outliner node の uuid → node map
@@ -26,12 +26,11 @@ declare const Timeline:
 	| undefined
 
 // filter bar 上の toggle 群の状態。 純粋なフィルタリング (= keyframesOnly / onlySelected) に加え、
-// 動作系 toggle (= autoScroll / abLoop / onionSkin) も同じ state に乗せて UI ロジックを単純化している。
+// 動作系 toggle (= abLoop / onionSkin) も同じ state に乗せて UI ロジックを単純化している。
 export interface FilterState {
 	query: string
 	keyframesOnly: boolean
 	onlySelected: boolean
-	autoScroll: boolean
 	abLoop: boolean
 	onionSkin: boolean
 }
@@ -112,7 +111,6 @@ export const filterState: FilterState = {
 	query: '',
 	keyframesOnly: false,
 	onlySelected: false,
-	autoScroll: false,
 	abLoop: false,
 	onionSkin: false,
 }
@@ -121,7 +119,6 @@ const FILTER_DEFAULTS: FilterState = {
 	query: '',
 	keyframesOnly: false,
 	onlySelected: false,
-	autoScroll: false,
 	abLoop: false,
 	onionSkin: false,
 }
@@ -163,7 +160,6 @@ function buildBar(): HTMLElement {
 	const toggles: Array<[keyof FilterState, string, string]> = [
 		['keyframesOnly', 'filter_alt', 'Show only animators with keyframes in this animation'],
 		['onlySelected', 'link', 'Sync with 3D selection'],
-		['autoScroll', 'gps_fixed', 'Auto-scroll panel to 3D selection'],
 		['abLoop', 'loop', 'A-B loop playback (Alt+Shift+A/B set, Alt+Shift+L toggle, Alt+Shift+X clear)'],
 		['onionSkin', 'layers', 'Onion Skin: show selected group ±1 frame ghosts'],
 	]
@@ -298,7 +294,6 @@ export function installAnimatorPanelUI(): () => void {
 		filterState.query = FILTER_DEFAULTS.query
 		filterState.keyframesOnly = FILTER_DEFAULTS.keyframesOnly
 		filterState.onlySelected = FILTER_DEFAULTS.onlySelected
-		filterState.autoScroll = FILTER_DEFAULTS.autoScroll
 		filterState.abLoop = FILTER_DEFAULTS.abLoop
 		filterState.onionSkin = FILTER_DEFAULTS.onionSkin
 

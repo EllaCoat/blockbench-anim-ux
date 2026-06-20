@@ -9,7 +9,7 @@ import { forceRefreshOnionSkin } from './onionSkin'
 import { addSelectionListener } from './selectionWatch'
 
 const TOGGLE_SELECTOR = '.anim-ux-toggle'
-const TOGGLE_KEYS: Array<keyof FilterState> = ['keyframesOnly', 'onlySelected', 'autoScroll', 'abLoop', 'onionSkin']
+const TOGGLE_KEYS: Array<keyof FilterState> = ['keyframesOnly', 'onlySelected', 'abLoop', 'onionSkin']
 
 let unsubscribeSelection: (() => void) | undefined
 
@@ -47,7 +47,6 @@ export function installTogglesHandler(): () => void {
 		// FilterState の各 key は boolean。 query (= string) は対象外なので switch で絞る。
 		if (key === 'keyframesOnly') filterState.keyframesOnly = next
 		else if (key === 'onlySelected') filterState.onlySelected = next
-		else if (key === 'autoScroll') filterState.autoScroll = next
 		else if (key === 'abLoop') filterState.abLoop = next
 		else if (key === 'onionSkin') filterState.onionSkin = next
 

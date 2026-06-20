@@ -1,13 +1,8 @@
 // blockbench-anim-ux — F: 矢印キーで keyframe ジャンプ
 //
-// 選択中 (= 複数可) animator の全 channel (= position / rotation / scale) を横断して、
+// 選択中 animator の全 channel (= position / rotation / scale) を横断して、
 // 現在の playhead 時刻より「次 / 前」 の最初の keyframe を見つけて Timeline.setTime() で移動する。
 // keybind は Shift + → / Shift + ← (= 単体の矢印キーは BB 標準で frame 移動等に使用)。
-//
-// v0.2 (= F-multi) 変更点 :
-//   - 単一 animator (= 最初に selected な 1 個) から、 selected な全 animator の union に拡張
-//   - 同時に keyframe が立ってる time (= 複数 animator が同 frame に keyframe を持つ) は dedupe
-//   - 単一選択時の挙動は v0.1 と同じ (= union が 1 個ぶんになるだけ)
 
 declare const Action: new (id: string, opts: Record<string, unknown>) => { delete(): void }
 declare const Keybind: new (opts: Record<string, unknown>) => unknown
@@ -31,26 +26,15 @@ declare const Prop: { active_panel?: string } | undefined
 function gatherSortedKeyframeTimes(): number[] {
 	const timeline = typeof Timeline !== 'undefined' ? Timeline : undefined
 	if (!timeline) return []
+	const animator = timeline.animators.find(a => a.selected)
+	if (!animator) return []
 	const times: number[] = []
-	for (const a of timeline.animators) {
-		if (!a.selected) continue
-		for (const ch of [a.position, a.rotation, a.scale]) {
-			if (!ch) continue
-			for (const kf of ch) times.push(kf.time)
-		}
+	for (const ch of [animator.position, animator.rotation, animator.scale]) {
+		if (!ch) continue
+		for (const kf of ch) times.push(kf.time)
 	}
-	if (times.length === 0) return []
 	times.sort((a, b) => a - b)
-	// 同 time に複数 animator が keyframe を持つケースを dedupe (= jumpTo の二分検索精度には影響しないが配列サイズ削減)
-	const uniq: number[] = []
-	let prev = Number.NEGATIVE_INFINITY
-	for (const t of times) {
-		if (t !== prev) {
-			uniq.push(t)
-			prev = t
-		}
-	}
-	return uniq
+	return times
 }
 
 function jumpTo(direction: 1 | -1): void {
