@@ -7,7 +7,11 @@
 //   - filter state は module level に保持し、 後続の search / toggles ファイルから書き換えて再描画
 
 declare const Panels: { timeline?: { node?: HTMLElement } } | undefined
-declare const Group: { all: Array<{ uuid: string; selected: boolean }> } | undefined
+// OutlinerNode.uuids は Group / NullObject / Locator / VanillaItemDisplay 等を含む全 outliner node の uuid → node map
+// (= Group.all は Group 型のみで、 AJ 拡張型を拾いたいときは OutlinerNode 経由が筋)
+declare const OutlinerNode:
+	| { uuids: Record<string, { selected?: boolean } | undefined> }
+	| undefined
 declare const Timeline:
 	| {
 			animators: Array<{
@@ -175,12 +179,12 @@ function ensureBarInPlace(): void {
 	ip.container.insertBefore(installedBar, ip.before)
 }
 
-function collectSelectedGroupUuids(): Set<string> {
+function collectSelectedNodeUuids(): Set<string> {
 	const set = new Set<string>()
-	const all = (typeof Group !== 'undefined' ? Group : undefined)?.all
-	if (!all) return set
-	for (const g of all) {
-		if (g.selected) set.add(g.uuid)
+	const uuids = (typeof OutlinerNode !== 'undefined' ? OutlinerNode : undefined)?.uuids
+	if (!uuids) return set
+	for (const uuid in uuids) {
+		if (uuids[uuid]?.selected) set.add(uuid)
 	}
 	return set
 }
@@ -192,7 +196,7 @@ export function applyFilter(): void {
 	const list = findAnimatorList()
 	if (!list) return
 	const q = filterState.query.trim().toLowerCase()
-	const selectedUuids = filterState.onlySelected ? collectSelectedGroupUuids() : undefined
+	const selectedUuids = filterState.onlySelected ? collectSelectedNodeUuids() : undefined
 
 	let keyframeMap: Map<string, boolean> | undefined
 	if (filterState.keyframesOnly) {
