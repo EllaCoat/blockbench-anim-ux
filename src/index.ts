@@ -3,6 +3,7 @@
 // 大型モデル (= ボーン 100+ 等) でのアニメーション作成効率化を目的とする。
 
 import { installAnimatorPanelUI } from './animatorPanelUI'
+import { installSearchHandler } from './search'
 
 declare const Plugin: { register(id: string, opts: Record<string, unknown>): void }
 
@@ -20,6 +21,7 @@ Plugin.register(PLUGIN_ID, {
 	version: '0.1.0',
 	onload() {
 		cleanups.push(installAnimatorPanelUI())
+		cleanups.push(installSearchHandler())
 		console.log(`[${PLUGIN_ID}] loaded`)
 	},
 	onunload() {

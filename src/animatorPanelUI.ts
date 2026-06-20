@@ -155,8 +155,10 @@ export function installAnimatorPanelUI(): () => void {
 
 	// timeline panel は Vue の再描画 / Project 切替で再生成され得る。
 	// document.body 全体を観察するが、 動作は ensureBarInPlace のべき等チェックで重複 inject を防ぐ。
+	// 再描画後の新規 row にも filter を再適用するため applyFilter も呼ぶ (= state は維持される)。
 	observer = new MutationObserver(() => {
 		ensureBarInPlace()
+		applyFilter()
 	})
 	observer.observe(document.body, { childList: true, subtree: true })
 
