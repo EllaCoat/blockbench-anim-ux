@@ -216,6 +216,10 @@ function installTimelineTimeSync(access: ElectronAccess): () => void {
 		if (applyingRemote) return
 		try {
 			const T = typeof Timeline !== 'undefined' ? Timeline : undefined
+			// 両 window 同時再生時の playhead 衝突を回避 (= 自 window 再生中は同期 send 抑止)。
+			// scrub 中 (= 再生停止 + setTime) は同期、 同時再生時は各自自走でずれを許容、
+			// stutter よりずれを優先する判断 (= 個人運用スタンス、 [[feedback_anim_ux_distribution_scope]])。
+			if (T?.playing) return
 			const time = T?.time
 			if (typeof time !== 'number' || !Number.isFinite(time)) return
 			// 直近反映した remote 値 / 自分が直前に送った値と一致するなら送信スキップ (= echo 抑止)
@@ -658,6 +662,8 @@ function installKeyframeEditSync(access: ElectronAccess): () => void {
 		if (typeof payload.uuid !== 'string') return
 		if (typeof payload.axis !== 'string') return
 		if (typeof payload.value !== 'number' && typeof payload.value !== 'string') return
+		// number の場合は NaN / Infinity を弾く (= typeof === 'number' だけだと NaN を通すため、 glm 指摘)
+		if (typeof payload.value === 'number' && !Number.isFinite(payload.value)) return
 		if (payload.animatorUuid !== undefined && typeof payload.animatorUuid !== 'string') return
 		if (payload.channel !== undefined && typeof payload.channel !== 'string') return
 		if (payload.dataPoint !== undefined) {
