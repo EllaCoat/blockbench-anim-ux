@@ -6,6 +6,7 @@ import { installAbLoop } from './abLoop'
 import { installAnimatorPanelUI } from './animatorPanelUI'
 import { installBreadcrumbs } from './breadcrumb'
 import { installKeyframeJump } from './keyframeJump'
+import { installMultiWindow } from './multiWindow'
 import { installOnionSkin } from './onionSkin'
 import { installSearchHandler } from './search'
 import { installTogglesHandler } from './toggles'
@@ -32,6 +33,7 @@ Plugin.register(PLUGIN_ID, {
 		cleanups.push(installKeyframeJump())
 		cleanups.push(installAbLoop())
 		cleanups.push(installOnionSkin())
+		cleanups.push(installMultiWindow())
 	},
 	onunload() {
 		for (const fn of cleanups) {
