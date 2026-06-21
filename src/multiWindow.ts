@@ -57,9 +57,28 @@ declare const Animation:
 	| {
 			selected?: {
 				uuid?: string
-				animators?: Record<string, { keyframes?: Array<{ uuid: string; selected?: boolean }> } | undefined>
+				animators?: Record<
+					string,
+					{ uuid?: string; keyframes?: Array<KeyframeLike> } | undefined
+				>
 			}
 			all?: Array<{ uuid: string; select?(): void }>
+	  }
+	| undefined
+
+interface KeyframeLike {
+	uuid: string
+	selected?: boolean
+	channel?: string
+	animator?: { uuid?: string }
+	set?(axis: string, value: number | string, data_point?: number): unknown
+}
+
+declare const Keyframe:
+	| {
+			prototype: {
+				set(axis: string, value: number | string, data_point?: number): unknown
+			}
 	  }
 	| undefined
 declare const OutlinerNode:
@@ -97,6 +116,7 @@ const CHANNEL_SELECTION = 'anim_ux:timeline:selection'
 const CHANNEL_PLAYING = 'anim_ux:timeline:playing'
 const CHANNEL_OUTLINER = 'anim_ux:outliner:selection'
 const CHANNEL_ANIMATION = 'anim_ux:animation:select'
+const CHANNEL_EDIT = 'anim_ux:keyframe:edit'
 
 function tryLoadElectron(): ElectronAccess | null {
 	try {
@@ -195,7 +215,7 @@ function installTimelineTimeSync(access: ElectronAccess): () => void {
 
 // --- Phase 2: Keyframe selection 同期 ---
 
-function getAllKeyframes(): Array<{ uuid: string; selected?: boolean }> {
+function getAllKeyframes(): Array<KeyframeLike> {
 	const A = typeof Animation !== 'undefined' ? Animation : undefined
 	const animators = A?.selected?.animators
 	if (!animators) return []
@@ -494,6 +514,136 @@ function installAnimationSelectionSync(access: ElectronAccess): () => void {
 	}
 }
 
+// --- Phase 5: Keyframe edit 同期 (experimental、 default OFF) ---
+//
+// Keyframe.prototype.set を monkey patch して、 値変更を window 間で同期する。
+//
+// 仕様 (= Codex 確認済、 keyframe.js:118-131) :
+//   - set(axis, value, data_point = 0) は副作用なしの直接代入 (= preview/selection は呼び出し側責務)
+//   - 戻り値 = this
+//   - 主要 edit 経路 = x/y/z 数値入力 / Molang editor / graph editor 値 drag / 数値 drag (= 全て set() 経由)
+//   - カバー外 = round keyframe values / file / bind_to_actor の直代入経路、 keyframe time 変更 (= setter なし)
+//
+// 注意 (= experimental の理由) :
+//   - monkey patch なので AJ 等の同種 hook と共存はしてもデバッグが面倒
+//   - 同時編集の競合は同期粒度 1 op 単位 = 後勝ち、 lock なし
+//   - 受信側で preview() を呼ばないと UI 反映遅延
+//   - cleanup で original 復帰させる、 plugin unload 時もこれで原状回復
+//
+// Phase 4 toggle の default は false (= 明示 ON 必要)。
+
+interface EditPayload {
+	sender?: string
+	op?: string
+	uuid?: string
+	animatorUuid?: string
+	channel?: string
+	axis?: string
+	value?: number | string
+	dataPoint?: number
+}
+
+function findKeyframe(
+	uuid: string,
+	animatorUuid: string | undefined,
+	preferChannel: string | undefined,
+): KeyframeLike | undefined {
+	const A = typeof Animation !== 'undefined' ? Animation : undefined
+	const animators = A?.selected?.animators
+	if (!animators) return undefined
+	for (const key in animators) {
+		const an = animators[key]
+		if (!an) continue
+		if (animatorUuid && an.uuid && an.uuid !== animatorUuid) continue
+		const list = an.keyframes ?? []
+		for (const kf of list) {
+			if (kf.uuid !== uuid) continue
+			if (preferChannel && kf.channel && kf.channel !== preferChannel) continue
+			return kf
+		}
+	}
+	// animator scope に居なければ全 animator から uuid だけで再探索 (= fallback)
+	for (const key in animators) {
+		const an = animators[key]
+		if (!an) continue
+		const list = an.keyframes ?? []
+		for (const kf of list) {
+			if (kf.uuid === uuid) return kf
+		}
+	}
+	return undefined
+}
+
+function installKeyframeEditSync(access: ElectronAccess): () => void {
+	const { ipcRenderer, remote } = access
+	const KF = typeof Keyframe !== 'undefined' ? Keyframe : undefined
+	if (!KF?.prototype?.set) {
+		console.warn('[anim_ux:multi-window] Keyframe.prototype.set unavailable, edit sync disabled')
+		return () => {}
+	}
+
+	let applyingRemote = false
+	const originalSet = KF.prototype.set
+
+	// monkey patch : set 呼出を IPC 送信に乗せる
+	KF.prototype.set = function (this: KeyframeLike, axis: string, value: number | string, dp?: number): unknown {
+		const result = originalSet.call(this, axis, value, dp)
+		if (!applyingRemote) {
+			try {
+				broadcast(ipcRenderer, remote, CHANNEL_EDIT, {
+					op: 'set',
+					uuid: this.uuid,
+					animatorUuid: this.animator?.uuid,
+					channel: this.channel,
+					axis,
+					value,
+					dataPoint: typeof dp === 'number' ? dp : 0,
+				})
+			} catch {
+				/* silent (= edit 経路は高頻度) */
+			}
+		}
+		return result
+	}
+
+	const receive = (_event: unknown, data: unknown): void => {
+		if (!data || typeof data !== 'object') return
+		const payload = data as EditPayload
+		if (payload.sender === SENDER_ID) return
+		if (payload.op !== 'set') return
+		if (typeof payload.uuid !== 'string') return
+		if (typeof payload.axis !== 'string') return
+		if (typeof payload.value !== 'number' && typeof payload.value !== 'string') return
+		const kf = findKeyframe(payload.uuid, payload.animatorUuid, payload.channel)
+		if (!kf?.set) return
+		applyingRemote = true
+		try {
+			kf.set(payload.axis, payload.value, payload.dataPoint ?? 0)
+			const A = typeof Animator !== 'undefined' ? Animator : undefined
+			A?.preview?.()
+		} catch (e) {
+			console.warn('[anim_ux:multi-window] apply remote edit failed', e)
+		} finally {
+			applyingRemote = false
+		}
+	}
+
+	ipcRenderer.on(CHANNEL_EDIT, receive)
+
+	return (): void => {
+		try {
+			ipcRenderer.removeAllListeners(CHANNEL_EDIT)
+		} catch {
+			/* noop */
+		}
+		try {
+			KF.prototype.set = originalSet
+		} catch {
+			/* noop */
+		}
+	}
+}
+
 // --- Phase 4: Settings toggle で各 sync を個別 ON/OFF ---
 //
 // 各 sync に個別 Setting (boolean toggle) を作成、 BB Settings > General に表示。
@@ -547,6 +697,14 @@ const SYNC_SPECS: SyncSpec[] = [
 		description: '別 BB window と選択中の animation を同期する',
 		defaultValue: true,
 		factory: installAnimationSelectionSync,
+	},
+	{
+		id: 'anim_ux_mw_edit',
+		name: 'Multi-window: Sync keyframe edit (experimental)',
+		description:
+			'⚠ 実験的。 Keyframe.prototype.set を monkey patch して値変更を同期。 同時編集の競合は後勝ち、 lock なし。 デバッグ困難時はまず OFF にして切り分け',
+		defaultValue: false,
+		factory: installKeyframeEditSync,
 	},
 ]
 
