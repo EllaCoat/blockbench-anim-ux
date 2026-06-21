@@ -1,24 +1,26 @@
 // blockbench-anim-ux — Multi-window 同期 (v0.4、 Phase 1〜5 + Settings 実装)
 //
 // 役割 :
-//   - BB の「File > Open in New Window」 で起動された別 window 間で state をリアルタイム同期
+//   - BB の「new_window」 で起動された別 window 間で state をリアルタイム同期
 //   - Phase 1 = Timeline.time (= 再生位置、 channel = 'anim_ux:timeline:time')
 //   - Phase 2 = Keyframe selection (= 選択中 keyframe、 channel = 'anim_ux:timeline:selection')
 //   - Phase 3 = Timeline.playing (= 再生状態) + OutlinerNode selection (= bone 選択) + Animation 切替
 //   - Phase 4 = BB Settings 個別 toggle (= 各 sync を ON/OFF、 default ON / edit のみ OFF)
 //   - Phase 5 = Keyframe edit (= 値変更、 experimental + default OFF、 Keyframe.prototype.set monkey patch)
-//   - feature detect = window.require が無ければ silent 無効化 (= 他機能は活きたまま)
+//   - feature detect = BroadcastChannel が無ければ silent 無効化 (= 他機能は活きたまま)
 //
-// IPC 経路 (= 非公式 / 抜け道、 詳細記録は [[aj-blockbench-anim-ux-v04]] 予定) :
-//   - BB の renderer は nodeIntegration: true, contextIsolation: false, enableRemoteModule: true
-//   - plugin loader の whitelist (= requireNativeModule) を window.require で回避
-//   - `window.require('electron').ipcRenderer` + `window.require('@electron/remote').BrowserWindow`
-//   - 公式 API ではないので BB / Electron 更新で壊れる可能性、 try/catch で fallback 必須
-//   - 参考実装 : EaseCation/blockbench-multi-window (MIT)、 アプローチのみ参考 (= コード直接 copy なし)
+// 通信経路 (= BroadcastChannel、 v0.4 後半で electron IPC から全面移行) :
+//   - BB v5.0+ は renderer から electron / @electron/remote を塞いだ (= requireNativeModule でも 'electron' は取得不可、
+//     実機 BB 5.1.4 で確認。 旧来の window.require は v4 で既に廃止済)
+//   - 代わりに web 標準 BroadcastChannel を使用 = 同一 origin の全 BB window へ自動 broadcast (= 他 window の列挙が不要)
+//   - 別 window (= 別 renderer プロセス) 間でも Chromium 実装で疎通する (= BB 5.1.4 で実機確認済)
+//   - electron 非依存なので BB / Electron 更新で壊れにくい
+//   - 参考 : EaseCation/blockbench-multi-window (MIT) は electron IPC 版 (= 旧 BB 向け、 v5 では動かない)
 //
 // 設計 :
-//   - 共通基盤 = tryLoadElectron + SENDER_ID + getOtherWindowIds + broadcast (= ファイル先頭)
-//   - broadcast() は payload に sender id + project uuid を自動付加、 receive は isWrongProject で別 project を drop
+//   - 共通基盤 = SENDER_ID + getCurrentProjectUuid + isWrongProject + openBus (= ファイル先頭)
+//   - openBus() は channel ごとに BroadcastChannel を開き、 post は sender id + project uuid を自動付加、
+//     受信は 非 object / 自 sender / 別 project を drop してから onReceive に渡す (= 各 sync の receive は個別 validation のみ)
 //   - 各 sync は独立した install*Sync() 関数、 cleanup 関数を返す
 //   - installMultiWindow() が複数 sync を compose して plugin の onload から呼ばれる
 //   - 各 sync は自身の applyingRemote flag で「受信→反映→自分発の event→再 send」 ループを防止
@@ -27,7 +29,7 @@
 //   - Animation 切替と OutlinerNode 選択が同時に変わる場合は Animation→OutlinerNode の順に適用 (= animation.select() が
 //     unselectAllElements() を呼ぶため、 OutlinerNode 反映が先だと吹き飛ぶ)
 //   - Phase 5 monkey patch は patchedSet を保持、 cleanup 時に他 plugin が後付け patch した場合は復帰 skip
-//   - cleanup は ipcRenderer.removeListener(channel, receive) で個別解除 (= removeAllListeners は他 listener を巻き込む)
+//   - cleanup は bus.close() で BroadcastChannel と message listener を個別解除
 //   - Setting オブジェクトは plugin unload 時に delete() で UI / registry 残骸も除去 (= BB 古版は silent fallback)
 
 declare const Blockbench:
@@ -94,27 +96,6 @@ declare function updateKeyframeSelection(): void
 declare function updateSelection(): void
 declare function unselectAllElements(): void
 
-interface IpcRenderer {
-	on(channel: string, listener: (event: unknown, ...args: unknown[]) => void): void
-	removeListener(channel: string, listener: (event: unknown, ...args: unknown[]) => void): void
-	removeAllListeners(channel: string): void
-	sendTo(webContentsId: number, channel: string, ...args: unknown[]): void
-}
-
-interface BrowserWindowStatic {
-	getAllWindows(): Array<{ webContents: { id: number } }>
-}
-
-interface ElectronRemote {
-	BrowserWindow: BrowserWindowStatic
-	getCurrentWebContents(): { id: number }
-}
-
-interface ElectronAccess {
-	ipcRenderer: IpcRenderer
-	remote: ElectronRemote
-}
-
 // 自 window 由来 msg を識別するための sender id。 plugin load ごとに新規発行 (= reload で更新される)。
 const SENDER_ID = `anim_ux-${Date.now()}-${Math.floor(Math.random() * 1e9).toString(36)}`
 
@@ -125,48 +106,9 @@ const CHANNEL_OUTLINER = 'anim_ux:outliner:selection'
 const CHANNEL_ANIMATION = 'anim_ux:animation:select'
 const CHANNEL_EDIT = 'anim_ux:keyframe:edit'
 
-function tryLoadElectron(): ElectronAccess | null {
-	try {
-		const w = window as unknown as { require?: (m: string) => unknown }
-		if (typeof w.require !== 'function') return null
-		const electron = w.require('electron') as { ipcRenderer?: IpcRenderer }
-		const remote = w.require('@electron/remote') as ElectronRemote | undefined
-		if (!electron?.ipcRenderer || !remote?.BrowserWindow || !remote?.getCurrentWebContents) return null
-		return { ipcRenderer: electron.ipcRenderer, remote }
-	} catch (e) {
-		console.warn('[anim_ux:multi-window] electron API unavailable, sync disabled', e)
-		return null
-	}
-}
-
-function getOtherWindowIds(remote: ElectronRemote): number[] {
-	try {
-		const selfId = remote.getCurrentWebContents().id
-		return remote.BrowserWindow.getAllWindows()
-			.map(w => w.webContents.id)
-			.filter(id => id !== selfId)
-	} catch {
-		return []
-	}
-}
-
 function getCurrentProjectUuid(): string | undefined {
 	const P = typeof Project !== 'undefined' ? Project : undefined
 	return typeof P?.uuid === 'string' ? P.uuid : undefined
-}
-
-function broadcast(
-	ipcRenderer: IpcRenderer,
-	remote: ElectronRemote,
-	channel: string,
-	payload: Record<string, unknown>,
-): void {
-	const others = getOtherWindowIds(remote)
-	if (others.length === 0) return
-	const wrapped = { sender: SENDER_ID, project: getCurrentProjectUuid(), ...payload }
-	for (const id of others) {
-		ipcRenderer.sendTo(id, channel, wrapped)
-	}
 }
 
 // 別 project が同 BB window で開かれてる場合、 受信した同期 msg を drop する判定。
@@ -178,10 +120,52 @@ function isWrongProject(payload: { project?: unknown }): boolean {
 	return payload.project !== cur
 }
 
+// BroadcastChannel が使える環境か (= desktop renderer。 非対応 / 古い環境では false)。
+function hasBroadcastChannel(): boolean {
+	return typeof BroadcastChannel === 'function'
+}
+
+interface SyncBus {
+	post(payload: Record<string, unknown>): void
+	close(): void
+}
+
+// channel ごとに BroadcastChannel を開く共通 helper。
+//   - post() = sender id + project uuid を自動付加して全 window に broadcast
+//   - 受信 = 非 object / 自 sender / 別 project を drop してから onReceive に渡す (= 各 sync は個別 validation のみ担当)
+//   - close() = message listener 解除 + channel close (= 二重に try/catch、 cleanup の対称性確保)
+function openBus(channel: string, onReceive: (payload: Record<string, unknown>) => void): SyncBus {
+	const bc = new BroadcastChannel(channel)
+	const handler = (e: MessageEvent): void => {
+		const data = e.data as Record<string, unknown> | null
+		if (!data || typeof data !== 'object') return
+		if (data.sender === SENDER_ID) return
+		if (isWrongProject(data)) return
+		onReceive(data)
+	}
+	bc.addEventListener('message', handler)
+	return {
+		post(payload: Record<string, unknown>): void {
+			bc.postMessage({ sender: SENDER_ID, project: getCurrentProjectUuid(), ...payload })
+		},
+		close(): void {
+			try {
+				bc.removeEventListener('message', handler)
+			} catch {
+				/* noop */
+			}
+			try {
+				bc.close()
+			} catch {
+				/* noop */
+			}
+		},
+	}
+}
+
 // --- Phase 1: Timeline.time 同期 ---
 
-function installTimelineTimeSync(access: ElectronAccess): () => void {
-	const { ipcRenderer, remote } = access
+function installTimelineTimeSync(): () => void {
 	let applyingRemote = false
 	// echo 防止用 = 直前に他 window に送った値 / 受信して反映した値を保持。
 	// display_animation_frame は非同期境界をまたいで再発火するため、 applyingRemote flag
@@ -190,19 +174,16 @@ function installTimelineTimeSync(access: ElectronAccess): () => void {
 	let lastSentTime = Number.NaN
 	let lastAppliedRemoteTime = Number.NaN
 
-	const receive = (_event: unknown, data: unknown): void => {
-		if (!data || typeof data !== 'object') return
-		const payload = data as { sender?: string; project?: string; time?: number }
-		if (payload.sender === SENDER_ID) return
-		if (isWrongProject(payload)) return
-		if (typeof payload.time !== 'number' || !Number.isFinite(payload.time)) return
+	const receive = (payload: Record<string, unknown>): void => {
+		const time = payload.time
+		if (typeof time !== 'number' || !Number.isFinite(time)) return
 		applyingRemote = true
 		try {
 			const T = typeof Timeline !== 'undefined' ? Timeline : undefined
 			// 正規 API setTime() で playhead UI も同期反映 (= 直代入だと playhead 位置が遅延更新になる)
-			if (T?.setTime) T.setTime(payload.time, true)
-			else if (T) T.time = payload.time
-			lastAppliedRemoteTime = payload.time
+			if (T?.setTime) T.setTime(time, true)
+			else if (T) T.time = time
+			lastAppliedRemoteTime = time
 			const A = typeof Animator !== 'undefined' ? Animator : undefined
 			A?.preview?.()
 		} catch (e) {
@@ -211,6 +192,8 @@ function installTimelineTimeSync(access: ElectronAccess): () => void {
 			applyingRemote = false
 		}
 	}
+
+	const bus = openBus(CHANNEL_TIME, receive)
 
 	const send = (): void => {
 		if (applyingRemote) return
@@ -226,22 +209,17 @@ function installTimelineTimeSync(access: ElectronAccess): () => void {
 			if (Math.abs(time - lastAppliedRemoteTime) < TIME_EPSILON) return
 			if (Math.abs(time - lastSentTime) < TIME_EPSILON) return
 			lastSentTime = time
-			broadcast(ipcRenderer, remote, CHANNEL_TIME, { time })
+			bus.post({ time })
 		} catch {
 			// 毎 frame 発火経路、 warn は spam になるので silent
 		}
 	}
 
-	ipcRenderer.on(CHANNEL_TIME, receive)
 	const Bb = typeof Blockbench !== 'undefined' ? Blockbench : undefined
 	Bb?.on('display_animation_frame', send)
 
 	return (): void => {
-		try {
-			ipcRenderer.removeListener(CHANNEL_TIME, receive)
-		} catch {
-			/* noop */
-		}
+		bus.close()
 		try {
 			Bb?.removeListener('display_animation_frame', send)
 		} catch {
@@ -292,20 +270,15 @@ function applyKeyframeSelection(uuids: string[]): void {
 	}
 }
 
-function installKeyframeSelectionSync(access: ElectronAccess): () => void {
-	const { ipcRenderer, remote } = access
+function installKeyframeSelectionSync(): () => void {
 	let applyingRemote = false
 	let lastSent: string[] = []
 
-	const receive = (_event: unknown, data: unknown): void => {
-		if (!data || typeof data !== 'object') return
-		const payload = data as { sender?: string; project?: string; uuids?: unknown }
-		if (payload.sender === SENDER_ID) return
-		if (isWrongProject(payload)) return
-		if (!Array.isArray(payload.uuids)) return
-		if (payload.uuids.length > 10000) return
-		if (!payload.uuids.every((v): v is string => typeof v === 'string')) return
+	const receive = (payload: Record<string, unknown>): void => {
 		const uuids = payload.uuids
+		if (!Array.isArray(uuids)) return
+		if (uuids.length > 10000) return
+		if (!uuids.every((v): v is string => typeof v === 'string')) return
 		applyingRemote = true
 		try {
 			applyKeyframeSelection(uuids)
@@ -315,28 +288,25 @@ function installKeyframeSelectionSync(access: ElectronAccess): () => void {
 		}
 	}
 
+	const bus = openBus(CHANNEL_SELECTION, receive)
+
 	const send = (): void => {
 		if (applyingRemote) return
 		try {
 			const cur = snapshotKeyframeSelection()
 			if (uuidSetsEqual(cur, lastSent)) return
 			lastSent = cur.slice()
-			broadcast(ipcRenderer, remote, CHANNEL_SELECTION, { uuids: cur })
+			bus.post({ uuids: cur })
 		} catch {
 			// silent (= 中頻度経路、 warn は控える)
 		}
 	}
 
-	ipcRenderer.on(CHANNEL_SELECTION, receive)
 	const Bb = typeof Blockbench !== 'undefined' ? Blockbench : undefined
 	Bb?.on('update_keyframe_selection', send)
 
 	return (): void => {
-		try {
-			ipcRenderer.removeListener(CHANNEL_SELECTION, receive)
-		} catch {
-			/* noop */
-		}
+		bus.close()
 		try {
 			Bb?.removeListener('update_keyframe_selection', send)
 		} catch {
@@ -347,22 +317,18 @@ function installKeyframeSelectionSync(access: ElectronAccess): () => void {
 
 // --- Phase 3-A: Timeline.playing 同期 ---
 
-function installTimelinePlayingSync(access: ElectronAccess): () => void {
-	const { ipcRenderer, remote } = access
+function installTimelinePlayingSync(): () => void {
 	let applyingRemote = false
 
-	const receive = (_event: unknown, data: unknown): void => {
-		if (!data || typeof data !== 'object') return
-		const payload = data as { sender?: string; project?: string; playing?: boolean }
-		if (payload.sender === SENDER_ID) return
-		if (isWrongProject(payload)) return
-		if (typeof payload.playing !== 'boolean') return
+	const receive = (payload: Record<string, unknown>): void => {
+		const playing = payload.playing
+		if (typeof playing !== 'boolean') return
 		const T = typeof Timeline !== 'undefined' ? Timeline : undefined
 		if (!T) return
-		if ((T.playing ?? false) === payload.playing) return
+		if ((T.playing ?? false) === playing) return
 		applyingRemote = true
 		try {
-			if (payload.playing) T.start?.()
+			if (playing) T.start?.()
 			else T.pause?.()
 		} catch (e) {
 			console.warn('[anim_ux:multi-window] apply remote playing failed', e)
@@ -371,10 +337,12 @@ function installTimelinePlayingSync(access: ElectronAccess): () => void {
 		}
 	}
 
+	const bus = openBus(CHANNEL_PLAYING, receive)
+
 	const sendPlay = (): void => {
 		if (applyingRemote) return
 		try {
-			broadcast(ipcRenderer, remote, CHANNEL_PLAYING, { playing: true })
+			bus.post({ playing: true })
 		} catch {
 			/* silent */
 		}
@@ -382,23 +350,18 @@ function installTimelinePlayingSync(access: ElectronAccess): () => void {
 	const sendPause = (): void => {
 		if (applyingRemote) return
 		try {
-			broadcast(ipcRenderer, remote, CHANNEL_PLAYING, { playing: false })
+			bus.post({ playing: false })
 		} catch {
 			/* silent */
 		}
 	}
 
-	ipcRenderer.on(CHANNEL_PLAYING, receive)
 	const Bb = typeof Blockbench !== 'undefined' ? Blockbench : undefined
 	Bb?.on('timeline_play', sendPlay)
 	Bb?.on('timeline_pause', sendPause)
 
 	return (): void => {
-		try {
-			ipcRenderer.removeListener(CHANNEL_PLAYING, receive)
-		} catch {
-			/* noop */
-		}
+		bus.close()
 		try {
 			Bb?.removeListener('timeline_play', sendPlay)
 		} catch {
@@ -450,20 +413,15 @@ function applyOutlinerSelection(uuids: string[]): void {
 	}
 }
 
-function installOutlinerSelectionSync(access: ElectronAccess): () => void {
-	const { ipcRenderer, remote } = access
+function installOutlinerSelectionSync(): () => void {
 	let applyingRemote = false
 	let lastSent: string[] = []
 
-	const receive = (_event: unknown, data: unknown): void => {
-		if (!data || typeof data !== 'object') return
-		const payload = data as { sender?: string; project?: string; uuids?: unknown }
-		if (payload.sender === SENDER_ID) return
-		if (isWrongProject(payload)) return
-		if (!Array.isArray(payload.uuids)) return
-		if (payload.uuids.length > 10000) return
-		if (!payload.uuids.every((v): v is string => typeof v === 'string')) return
+	const receive = (payload: Record<string, unknown>): void => {
 		const uuids = payload.uuids
+		if (!Array.isArray(uuids)) return
+		if (uuids.length > 10000) return
+		if (!uuids.every((v): v is string => typeof v === 'string')) return
 		applyingRemote = true
 		try {
 			applyOutlinerSelection(uuids)
@@ -473,28 +431,25 @@ function installOutlinerSelectionSync(access: ElectronAccess): () => void {
 		}
 	}
 
+	const bus = openBus(CHANNEL_OUTLINER, receive)
+
 	const send = (): void => {
 		if (applyingRemote) return
 		try {
 			const cur = snapshotOutlinerSelection()
 			if (uuidSetsEqual(cur, lastSent)) return
 			lastSent = cur.slice()
-			broadcast(ipcRenderer, remote, CHANNEL_OUTLINER, { uuids: cur })
+			bus.post({ uuids: cur })
 		} catch {
 			/* silent */
 		}
 	}
 
-	ipcRenderer.on(CHANNEL_OUTLINER, receive)
 	const Bb = typeof Blockbench !== 'undefined' ? Blockbench : undefined
 	Bb?.on('update_selection', send)
 
 	return (): void => {
-		try {
-			ipcRenderer.removeListener(CHANNEL_OUTLINER, receive)
-		} catch {
-			/* noop */
-		}
+		bus.close()
 		try {
 			Bb?.removeListener('update_selection', send)
 		} catch {
@@ -505,20 +460,16 @@ function installOutlinerSelectionSync(access: ElectronAccess): () => void {
 
 // --- Phase 3-C: Animation 切替同期 ---
 
-function installAnimationSelectionSync(access: ElectronAccess): () => void {
-	const { ipcRenderer, remote } = access
+function installAnimationSelectionSync(): () => void {
 	let applyingRemote = false
 
-	const receive = (_event: unknown, data: unknown): void => {
-		if (!data || typeof data !== 'object') return
-		const payload = data as { sender?: string; project?: string; uuid?: unknown }
-		if (payload.sender === SENDER_ID) return
-		if (isWrongProject(payload)) return
-		if (typeof payload.uuid !== 'string') return
+	const receive = (payload: Record<string, unknown>): void => {
+		const uuid = payload.uuid
+		if (typeof uuid !== 'string') return
 		const A = typeof Animation !== 'undefined' ? Animation : undefined
-		const target = A?.all?.find(a => a.uuid === payload.uuid)
+		const target = A?.all?.find(a => a.uuid === uuid)
 		if (!target) return
-		if (A?.selected?.uuid === payload.uuid) return
+		if (A?.selected?.uuid === uuid) return
 		applyingRemote = true
 		try {
 			target.select?.()
@@ -529,28 +480,25 @@ function installAnimationSelectionSync(access: ElectronAccess): () => void {
 		}
 	}
 
+	const bus = openBus(CHANNEL_ANIMATION, receive)
+
 	const send = (): void => {
 		if (applyingRemote) return
 		try {
 			const A = typeof Animation !== 'undefined' ? Animation : undefined
 			const uuid = A?.selected?.uuid
 			if (typeof uuid !== 'string') return
-			broadcast(ipcRenderer, remote, CHANNEL_ANIMATION, { uuid })
+			bus.post({ uuid })
 		} catch {
 			/* silent */
 		}
 	}
 
-	ipcRenderer.on(CHANNEL_ANIMATION, receive)
 	const Bb = typeof Blockbench !== 'undefined' ? Blockbench : undefined
 	Bb?.on('select_animation', send)
 
 	return (): void => {
-		try {
-			ipcRenderer.removeListener(CHANNEL_ANIMATION, receive)
-		} catch {
-			/* noop */
-		}
+		bus.close()
 		try {
 			Bb?.removeListener('select_animation', send)
 		} catch {
@@ -619,8 +567,7 @@ function findKeyframe(
 	return undefined
 }
 
-function installKeyframeEditSync(access: ElectronAccess): () => void {
-	const { ipcRenderer, remote } = access
+function installKeyframeEditSync(): () => void {
 	const KF = typeof Keyframe !== 'undefined' ? Keyframe : undefined
 	if (!KF?.prototype?.set) {
 		console.warn('[anim_ux:multi-window] Keyframe.prototype.set unavailable, edit sync disabled')
@@ -630,13 +577,42 @@ function installKeyframeEditSync(access: ElectronAccess): () => void {
 	let applyingRemote = false
 	const originalSet = KF.prototype.set
 
-	// monkey patch : set 呼出を IPC 送信に乗せる。
+	const receive = (payload: Record<string, unknown>): void => {
+		const p = payload as EditPayload
+		if (p.op !== 'set') return
+		if (typeof p.uuid !== 'string') return
+		if (typeof p.axis !== 'string') return
+		if (typeof p.value !== 'number' && typeof p.value !== 'string') return
+		// number の場合は NaN / Infinity を弾く (= typeof === 'number' だけだと NaN を通すため、 glm 指摘)
+		if (typeof p.value === 'number' && !Number.isFinite(p.value)) return
+		if (p.animatorUuid !== undefined && typeof p.animatorUuid !== 'string') return
+		if (p.channel !== undefined && typeof p.channel !== 'string') return
+		if (p.dataPoint !== undefined) {
+			if (typeof p.dataPoint !== 'number' || !Number.isInteger(p.dataPoint) || p.dataPoint < 0) return
+		}
+		const kf = findKeyframe(p.uuid, p.animatorUuid, p.channel)
+		if (!kf?.set) return
+		applyingRemote = true
+		try {
+			kf.set(p.axis, p.value, p.dataPoint ?? 0)
+			const A = typeof Animator !== 'undefined' ? Animator : undefined
+			A?.preview?.()
+		} catch (e) {
+			console.warn('[anim_ux:multi-window] apply remote edit failed', e)
+		} finally {
+			applyingRemote = false
+		}
+	}
+
+	const bus = openBus(CHANNEL_EDIT, receive)
+
+	// monkey patch : set 呼出を broadcast に乗せる。
 	// patchedSet を識別子として保持し、 cleanup 時に他 plugin が後付けで patch した場合は復帰を skip する。
 	const patchedSet = function (this: KeyframeLike, axis: string, value: number | string, dp?: number): unknown {
 		const result = originalSet.call(this, axis, value, dp)
 		if (!applyingRemote) {
 			try {
-				broadcast(ipcRenderer, remote, CHANNEL_EDIT, {
+				bus.post({
 					op: 'set',
 					uuid: this.uuid,
 					animatorUuid: this.animator?.uuid,
@@ -653,44 +629,8 @@ function installKeyframeEditSync(access: ElectronAccess): () => void {
 	}
 	KF.prototype.set = patchedSet
 
-	const receive = (_event: unknown, data: unknown): void => {
-		if (!data || typeof data !== 'object') return
-		const payload = data as EditPayload
-		if (payload.sender === SENDER_ID) return
-		if (isWrongProject(payload)) return
-		if (payload.op !== 'set') return
-		if (typeof payload.uuid !== 'string') return
-		if (typeof payload.axis !== 'string') return
-		if (typeof payload.value !== 'number' && typeof payload.value !== 'string') return
-		// number の場合は NaN / Infinity を弾く (= typeof === 'number' だけだと NaN を通すため、 glm 指摘)
-		if (typeof payload.value === 'number' && !Number.isFinite(payload.value)) return
-		if (payload.animatorUuid !== undefined && typeof payload.animatorUuid !== 'string') return
-		if (payload.channel !== undefined && typeof payload.channel !== 'string') return
-		if (payload.dataPoint !== undefined) {
-			if (typeof payload.dataPoint !== 'number' || !Number.isInteger(payload.dataPoint) || payload.dataPoint < 0) return
-		}
-		const kf = findKeyframe(payload.uuid, payload.animatorUuid, payload.channel)
-		if (!kf?.set) return
-		applyingRemote = true
-		try {
-			kf.set(payload.axis, payload.value, payload.dataPoint ?? 0)
-			const A = typeof Animator !== 'undefined' ? Animator : undefined
-			A?.preview?.()
-		} catch (e) {
-			console.warn('[anim_ux:multi-window] apply remote edit failed', e)
-		} finally {
-			applyingRemote = false
-		}
-	}
-
-	ipcRenderer.on(CHANNEL_EDIT, receive)
-
 	return (): void => {
-		try {
-			ipcRenderer.removeListener(CHANNEL_EDIT, receive)
-		} catch {
-			/* noop */
-		}
+		bus.close()
 		try {
 			// 自分の patchedSet がまだ生きてる時のみ originalSet に戻す。 後付け patch を奪わない。
 			if (KF.prototype.set === patchedSet) {
@@ -709,7 +649,7 @@ function installKeyframeEditSync(access: ElectronAccess): () => void {
 // --- Phase 4: Settings toggle で各 sync を個別 ON/OFF ---
 //
 // 各 sync に個別 Setting (boolean toggle) を作成、 BB Settings > General に表示。
-// toggle ON 時は対応する install*Sync() で IPC listener + Blockbench event listener を attach、
+// toggle ON 時は対応する install*Sync() で BroadcastChannel + Blockbench event listener を attach、
 // OFF 時は cleanup を呼んで全 detach。 plugin unload 時にも cleanup 走らせる。
 //
 // 設計の根拠 :
@@ -721,7 +661,7 @@ interface SyncSpec {
 	name: string
 	description: string
 	defaultValue: boolean
-	factory: (access: ElectronAccess) => () => void
+	factory: () => () => void
 }
 
 interface SettingWithDelete extends Setting {
@@ -774,13 +714,13 @@ const SYNC_SPECS: SyncSpec[] = [
 	},
 ]
 
-function createSyncToggle(spec: SyncSpec, access: ElectronAccess): () => void {
+function createSyncToggle(spec: SyncSpec): () => void {
 	let cleanup: (() => void) | null = null
 
 	const apply = (enabled: boolean): void => {
 		if (enabled && !cleanup) {
 			try {
-				cleanup = spec.factory(access)
+				cleanup = spec.factory()
 			} catch (e) {
 				console.warn(`[anim_ux:multi-window] install ${spec.id} failed`, e)
 				cleanup = null
@@ -827,12 +767,15 @@ function createSyncToggle(spec: SyncSpec, access: ElectronAccess): () => void {
 // --- Compose ---
 
 export function installMultiWindow(): () => void {
-	const access = tryLoadElectron()
-	if (!access) return () => {}
+	if (!hasBroadcastChannel()) {
+		console.warn('[anim_ux:multi-window] BroadcastChannel unavailable, multi-window sync disabled')
+		return () => {}
+	}
+	console.log('[anim_ux:multi-window] enabled (BroadcastChannel)')
 
 	const cleanups: Array<() => void> = []
 	for (const spec of SYNC_SPECS) {
-		cleanups.push(createSyncToggle(spec, access))
+		cleanups.push(createSyncToggle(spec))
 	}
 
 	return (): void => {
