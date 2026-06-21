@@ -28,6 +28,20 @@
 declare const Blockbench:
 	| { on(event: string, cb: () => void): void; removeListener(event: string, cb: () => void): void }
 	| undefined
+declare class Setting {
+	constructor(
+		id: string,
+		opts: {
+			value: boolean
+			category?: string
+			name?: string
+			description?: string
+			type?: string
+			onChange?: (v: boolean) => void
+		},
+	)
+	value: boolean
+}
 declare const Timeline:
 	| {
 			time?: number
@@ -480,6 +494,103 @@ function installAnimationSelectionSync(access: ElectronAccess): () => void {
 	}
 }
 
+// --- Phase 4: Settings toggle で各 sync を個別 ON/OFF ---
+//
+// 各 sync に個別 Setting (boolean toggle) を作成、 BB Settings > General に表示。
+// toggle ON 時は対応する install*Sync() で IPC listener + Blockbench event listener を attach、
+// OFF 時は cleanup を呼んで全 detach。 plugin unload 時にも cleanup 走らせる。
+//
+// 設計の根拠 :
+//   - 「片方の window で実験中に同期が邪魔」 シーンで toggle 切替が即効 (= plugin reload 不要)
+//   - install / cleanup の対称性は selectionWatch の addSelectionListener と同パターン
+
+interface SyncSpec {
+	id: string
+	name: string
+	description: string
+	defaultValue: boolean
+	factory: (access: ElectronAccess) => () => void
+}
+
+const SYNC_SPECS: SyncSpec[] = [
+	{
+		id: 'anim_ux_mw_time',
+		name: 'Multi-window: Sync timeline time',
+		description: '別 BB window と再生位置 (Timeline.time) を同期する',
+		defaultValue: true,
+		factory: installTimelineTimeSync,
+	},
+	{
+		id: 'anim_ux_mw_kfsel',
+		name: 'Multi-window: Sync keyframe selection',
+		description: '別 BB window と選択中の keyframe を同期する',
+		defaultValue: true,
+		factory: installKeyframeSelectionSync,
+	},
+	{
+		id: 'anim_ux_mw_playing',
+		name: 'Multi-window: Sync play / pause',
+		description: '別 BB window と再生 / 停止状態を同期する',
+		defaultValue: true,
+		factory: installTimelinePlayingSync,
+	},
+	{
+		id: 'anim_ux_mw_outliner',
+		name: 'Multi-window: Sync outliner selection',
+		description: '別 BB window と 3D / outliner の選択状態を同期する',
+		defaultValue: true,
+		factory: installOutlinerSelectionSync,
+	},
+	{
+		id: 'anim_ux_mw_anim',
+		name: 'Multi-window: Sync animation switch',
+		description: '別 BB window と選択中の animation を同期する',
+		defaultValue: true,
+		factory: installAnimationSelectionSync,
+	},
+]
+
+function createSyncToggle(spec: SyncSpec, access: ElectronAccess): () => void {
+	let cleanup: (() => void) | null = null
+
+	const apply = (enabled: boolean): void => {
+		if (enabled && !cleanup) {
+			try {
+				cleanup = spec.factory(access)
+			} catch (e) {
+				console.warn(`[anim_ux:multi-window] install ${spec.id} failed`, e)
+				cleanup = null
+			}
+		} else if (!enabled && cleanup) {
+			try {
+				cleanup()
+			} catch (e) {
+				console.warn(`[anim_ux:multi-window] cleanup ${spec.id} failed`, e)
+			}
+			cleanup = null
+		}
+	}
+
+	let setting: Setting
+	try {
+		setting = new Setting(spec.id, {
+			value: spec.defaultValue,
+			category: 'general',
+			name: spec.name,
+			description: spec.description,
+			type: 'boolean',
+			onChange: (v: boolean) => apply(v),
+		})
+	} catch (e) {
+		console.warn(`[anim_ux:multi-window] Setting ${spec.id} ctor failed, defaulting to ON`, e)
+		apply(spec.defaultValue)
+		return () => apply(false)
+	}
+
+	apply(setting.value)
+	return () => apply(false)
+}
+
 // --- Compose ---
 
 export function installMultiWindow(): () => void {
@@ -487,11 +598,9 @@ export function installMultiWindow(): () => void {
 	if (!access) return () => {}
 
 	const cleanups: Array<() => void> = []
-	cleanups.push(installTimelineTimeSync(access))
-	cleanups.push(installKeyframeSelectionSync(access))
-	cleanups.push(installTimelinePlayingSync(access))
-	cleanups.push(installOutlinerSelectionSync(access))
-	cleanups.push(installAnimationSelectionSync(access))
+	for (const spec of SYNC_SPECS) {
+		cleanups.push(createSyncToggle(spec, access))
+	}
 
 	return (): void => {
 		for (const fn of cleanups) {
