@@ -61,6 +61,19 @@ export function findElementByIdInDocs(id: string): HTMLElement | null {
 	return null
 }
 
+// 現在 popout 中の子窓 document を返す (= 居なければ null)。
+// 外部連携 (= AJ 本体 mod の hover popup 等) が「親 + 子窓の両方に DOM を mount したい」 時に使う。
+// stale childDoc (= 子窓 crash で defaultView 死んでる場合) は getDocuments と同じ guard で除外。
+export function getActivePopoutDocument(): Document | null {
+	if (!childDoc) return null
+	const win = childDoc.defaultView
+	if (win == null || win.closed) {
+		childDoc = null
+		return null
+	}
+	return childDoc
+}
+
 export function addDocumentListener(
 	type: string,
 	fn: EventListenerOrEventListenerObject,

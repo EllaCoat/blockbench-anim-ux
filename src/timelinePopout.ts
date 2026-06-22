@@ -173,6 +173,13 @@ function installEventProxy(childWin: Window): () => void {
 		}
 		return active.isContentEditable === true
 	}
+	// 子窓 text input フォーカス中でも親に流したい「global shortcut」 key の whitelist。
+	// (= Undo/Redo/Save/Copy/Paste/Cut/SelectAll/Find などの修飾キー組合せ)
+	// それ以外の Ctrl/Meta 付きキー (= Ctrl+Arrow / Ctrl+Backspace / Ctrl+Home 等の input 編集系) は
+	// 親 document に流すと BB / AJ の shortcut が誤発火するため、 子窓 input にとどめる。
+	const TEXT_INPUT_PASSTHROUGH_KEYS = new Set([
+		'z', 'Z', 'y', 'Y', 's', 'S', 'c', 'C', 'v', 'V', 'x', 'X', 'a', 'A', 'f', 'F',
+	])
 	const proxyKey = (type: 'keydown' | 'keyup'): ((e: KeyboardEvent) => void) => (e: KeyboardEvent): void => {
 		try {
 			// IME 変換中 (= 日本語入力 / 中国語入力 等) の key event は親に投げない。
@@ -180,7 +187,12 @@ function installEventProxy(childWin: Window): () => void {
 			// `isComposing` は KeyboardEvent 標準プロパティ (= Chromium 全 version 対応)。
 			if (e.isComposing) return
 			const hasGlobalModifier = e.ctrlKey || e.metaKey
-			if (isChildTextInputFocused() && !hasGlobalModifier) return
+			if (isChildTextInputFocused()) {
+				// 修飾キーなしは proxy 不要 (= 子窓 input の標準入力)
+				if (!hasGlobalModifier) return
+				// Ctrl/Meta 付きでも、 input 編集系 shortcut は親に漏らさない (= Ctrl+Arrow / Ctrl+Backspace 等)
+				if (!TEXT_INPUT_PASSTHROUGH_KEYS.has(e.key)) return
+			}
 			const cloned = new KeyboardEvent(type, {
 				bubbles: true,
 				cancelable: true,
@@ -207,6 +219,99 @@ function installEventProxy(childWin: Window): () => void {
 	const kd = proxyKey('keydown')
 	const ku = proxyKey('keyup')
 
+	// Ctrl + wheel zoom の救済 (= 子窓 timeline 上で Ctrl+wheel しても zoom 不発の bug 修正、 v0.5)。
+	//
+	// BB の TIMELINE wheel handler (= timeline.js:558-587) は
+	//   is_zoom_gesture = event.ctrlKey && !Pressing.ctrl
+	// で zoom 判定し、 `addEventListeners(timeline_vue, 'mousewheel scroll', ...)` で **`mousewheel`** event に
+	// bind する (= 標準 `wheel` ではなく legacy event 名)。 子窓で Ctrl 押下 → keyboard proxy で親 document にも
+	// keydown 届く → keyboard.js:664/922 が Pressing.ctrl=true に倒す → ctrlKey=true でも is_zoom_gesture=false で
+	// zoom 不発、 通常 scroll に倒れる。
+	//
+	// 対策 = 子窓 `wheel` + `mousewheel` 両方の capture phase で Pressing.ctrl を一時 false に退避、 bubble phase で
+	//        復元する sandwich。 Chromium は両 event を発火する (= 順序は wheel → mousewheel)、 どちらが BB handler を
+	//        起こすかは event 名次第なので両方張る。 pressingPatched flag で連続発火時の二重 save (= false を save する
+	//        bug) を防止、 microtask 復元で AJ hover popup 等の stopImmediatePropagation 被弾を保険する。
+	const pressingHolder = window as unknown as { Pressing?: { ctrl?: boolean } }
+	let pressingPatched = false
+	let savedPressingCtrl = false
+	const restorePressing = (): void => {
+		if (!pressingPatched) return
+		const P = pressingHolder.Pressing
+		if (P) P.ctrl = savedPressingCtrl
+		pressingPatched = false
+	}
+	// wheel → mousewheel bridge (= v0.5 致命対応)。
+	// Chromium は子窓 document で legacy `mousewheel` event を発火させない (= 親 document では発火するが、
+	// adoptNode 移植後の子窓では起こらないことが実機 log で確定)。 BB の TIMELINE wheel handler は
+	// `addEventListeners(timeline_vue, 'mousewheel scroll', ...)` で **mousewheel** listener、 子窓では起動しない。
+	// 対策 = 子窓 wheel event 発火時に、 timeline_vue 配下が target なら mousewheel event を同期再 dispatch、
+	//        BB の既存 handler を起こす。 same document realm なので Event ctor 問題 (= cross-realm) は無い。
+	// loop 防止 = dispatch した event に mark を打ち、 wheelCapture で見たら再 dispatch しない。
+	const BRIDGE_MARK = '_ajPopoutBridged'
+	const bridgeWheelToMousewheel = (e: WheelEvent): void => {
+		if ((e as unknown as Record<string, unknown>)[BRIDGE_MARK]) return
+		const target = e.target as Element | null
+		const timelineVue = childWin.document.getElementById('timeline_vue')
+		if (!target || !timelineVue || !timelineVue.contains(target)) return
+		const WEvCtor = (childWin as unknown as { WheelEvent?: typeof WheelEvent }).WheelEvent
+		if (!WEvCtor) return
+		try {
+			// 元 wheel の browser default scroll を止めて、 BB の独自 scroll 計算に委ねる
+			e.preventDefault()
+			const cloned = new WEvCtor('mousewheel', {
+				bubbles: true,
+				cancelable: true,
+				deltaX: e.deltaX,
+				deltaY: e.deltaY,
+				deltaZ: e.deltaZ,
+				deltaMode: e.deltaMode,
+				clientX: e.clientX,
+				clientY: e.clientY,
+				screenX: e.screenX,
+				screenY: e.screenY,
+				button: e.button,
+				buttons: e.buttons,
+				ctrlKey: e.ctrlKey,
+				shiftKey: e.shiftKey,
+				altKey: e.altKey,
+				metaKey: e.metaKey,
+				view: childWin,
+			})
+			Object.defineProperty(cloned, BRIDGE_MARK, { value: true, configurable: true })
+			timelineVue.dispatchEvent(cloned)
+		} catch (err) {
+			console.warn('[anim_ux:popout] wheel→mousewheel bridge failed', err)
+		}
+	}
+	const wheelCapture = (e: Event): void => {
+		const we = e as WheelEvent
+		const isCtrlZoom = we.ctrlKey && !we.shiftKey
+		// shift+wheel は BB が水平 scroll に倒すので zoom 対象外、 触らない
+		if (!isCtrlZoom) {
+			// Ctrl 無し wheel も BB の onMouseWheel に届ける必要がある (= 縦 scroll / shift 横 scroll 等)
+			if (e.type === 'wheel') bridgeWheelToMousewheel(we)
+			return
+		}
+		const P = pressingHolder.Pressing
+		if (P) {
+			// 既に patched 中なら save 上書きしない (= wheel と mousewheel 連発時に false を save する事故防止)
+			if (!pressingPatched) {
+				savedPressingCtrl = P.ctrl ?? false
+				pressingPatched = true
+			}
+			P.ctrl = false
+		}
+		// sandwich の最中 (= Pressing.ctrl=false 状態) に bridge を起こして BB handler を呼ぶ
+		if (e.type === 'wheel') bridgeWheelToMousewheel(we)
+		// AJ hover popup 等が capture phase で stopImmediatePropagation すると bubble 復元が
+		// 飛ぶので、 microtask でも復元する保険を張る (= 同期処理終了後に必ず走る、 二重復元は no-op)。
+		queueMicrotask(restorePressing)
+	}
+	const wheelBubble = (_e: Event): void => {
+		restorePressing()
+	}
+
 	// capture: true で他リスナーより先に走らせる (= BB の Vue handler 等が止める前に親に届ける)
 	childWin.document.addEventListener('mousemove', mm, true)
 	childWin.document.addEventListener('mouseup', mu, true)
@@ -214,6 +319,11 @@ function installEventProxy(childWin: Window): () => void {
 	childWin.document.addEventListener('touchend', te, true)
 	childWin.document.addEventListener('keydown', kd, true)
 	childWin.document.addEventListener('keyup', ku, true)
+	childWin.document.addEventListener('wheel', wheelCapture, true)
+	childWin.document.addEventListener('wheel', wheelBubble, false)
+	// BB は legacy `mousewheel` event 名で bind するので、 こちらにも同じ sandwich を張る (= zoom 修正の本命)
+	childWin.document.addEventListener('mousewheel', wheelCapture, true)
+	childWin.document.addEventListener('mousewheel', wheelBubble, false)
 
 	return (): void => {
 		try { childWin.document.removeEventListener('mousemove', mm, true) } catch { /* noop */ }
@@ -222,6 +332,12 @@ function installEventProxy(childWin: Window): () => void {
 		try { childWin.document.removeEventListener('touchend', te, true) } catch { /* noop */ }
 		try { childWin.document.removeEventListener('keydown', kd, true) } catch { /* noop */ }
 		try { childWin.document.removeEventListener('keyup', ku, true) } catch { /* noop */ }
+		try { childWin.document.removeEventListener('wheel', wheelCapture, true) } catch { /* noop */ }
+		try { childWin.document.removeEventListener('wheel', wheelBubble, false) } catch { /* noop */ }
+		try { childWin.document.removeEventListener('mousewheel', wheelCapture, true) } catch { /* noop */ }
+		try { childWin.document.removeEventListener('mousewheel', wheelBubble, false) } catch { /* noop */ }
+		// cleanup 中に sandwich の途中で抜けた場合に備え、 ctrl 状態を戻す保険
+		restorePressing()
 	}
 }
 

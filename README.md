@@ -25,6 +25,20 @@ and Adobe After Effects (Shy / property-based filtering).
 - **Onion Skin Range dialog** — adjust onion skin span (±1〜5 frames) with linear distance fade; values persist in localStorage
 - **A-B loop timeline markers** — vertical lines on the timeline (A green / B red), scroll & zoom aware
 
+### v0.5 — Pop-out completeness + AnimUX optional API
+
+- **Ctrl + wheel zoom inside the pop-out** — the v0.4 limitation is gone. Wheel events
+  in the child window are mirrored as `mousewheel` to the in-place handler so the
+  pop-out timeline behaves identically to the docked one (zoom, vertical scroll,
+  Shift-horizontal scroll all work).
+- **`window.AnimUX` optional API** — companion plugins (e.g. AnimatedJava's keyframe
+  hover popup) can opt-in to pop-out-aware DOM hooks without depending on anim_ux
+  being installed:
+  - `AnimUX.addDocumentListener(type, fn, opts)` — bind to the parent document, plus
+    the pop-out child document if one is open; returns a detach callback.
+  - `AnimUX.getActivePopoutDocument()` — the pop-out child `Document` if open, else `null`.
+  - `AnimUX.version` — semver string for feature detection.
+
 ### v0.4 — TIMELINE pop-out (experimental)
 
 Detach the TIMELINE panel into a separate window so you can keep it on a
@@ -51,15 +65,14 @@ stays on the primary window.
   configuration (`nodeIntegration: true`, single Electron process). A future
   Blockbench release that disables node integration or moves the renderer to
   an isolated context will most likely break this path.
-- **Ctrl + wheel zoom** on the timeline is not currently supported inside the
-  pop-out window. (Blockbench distinguishes a pinch-zoom gesture from a real
-  Ctrl-hold by checking `Pressing.ctrl`, which the proxied key events flip
-  early. Working around it cleanly is on the wishlist; see the PR description.)
 - **IME / text input.** Inside the pop-out, plain keys typed while an
   `<input>` / `<textarea>` / `contenteditable` element is focused are *not*
   proxied to the main window (so they edit the text instead of firing
-  shortcuts). Modifier-bearing combinations (Ctrl / Meta) still pass through,
-  so Undo etc. work. IME composition events are also suppressed so a
+  shortcuts). Modifier-bearing combinations (Ctrl / Meta) that map to global
+  shortcuts (Undo, Redo, Save, Copy / Paste / Cut, Select-All, Find) still
+  pass through; text-editing combinations such as `Ctrl+Arrow` / `Ctrl+Home` /
+  `Ctrl+Backspace` are kept inside the pop-out input so they don't accidentally
+  fire a main-window shortcut. IME composition events are also suppressed so a
   Japanese / Chinese conversion-confirming Enter doesn't accidentally fire a
   global shortcut.
 
