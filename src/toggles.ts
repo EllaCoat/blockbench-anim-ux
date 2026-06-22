@@ -7,6 +7,7 @@
 import { syncAbLoopWatch } from './abLoop'
 import { applyFilter, filterState, type FilterState } from './animatorPanelUI'
 import { forceRefreshOnionSkin } from './onionSkin'
+import { addDocumentListener, queryAllInDocs } from './popoutBus'
 import { addSelectionListener } from './selectionWatch'
 
 const TOGGLE_SELECTOR = '.anim-ux-toggle'
@@ -28,8 +29,10 @@ function stopSelectionWatch(): void {
 // MutationObserver で bar が再 inject された後でも button が新規 element になるため、
 // applyFilter() を呼ぶたびに class 状態も再描画する。
 // export で他 module (= abLoop の shortcut 経由 toggle 等) からも呼べるようにしている。
+// popout 中は TIMELINE container 諸共 button が子窓に居るので、 親 document scope だけだと
+// active class が反映されない。 queryAllInDocs で親 + 子窓を横断して拾う。
 export function syncToggleVisuals(): void {
-	const buttons = document.querySelectorAll<HTMLElement>(TOGGLE_SELECTOR)
+	const buttons = queryAllInDocs<HTMLElement>(TOGGLE_SELECTOR)
 	for (const btn of buttons) {
 		const key = btn.dataset.key as keyof FilterState | undefined
 		if (!key || !TOGGLE_KEYS.includes(key)) continue
@@ -69,10 +72,11 @@ export function installTogglesHandler(): () => void {
 		applyFilter()
 	}
 
-	document.addEventListener('click', handler, true)
+	// popout 中は子窓 document にも自動 attach (= TIMELINE 別窓内のトグルクリックも拾う)
+	const removeListener = addDocumentListener('click', handler, true)
 
 	return () => {
-		document.removeEventListener('click', handler, true)
+		removeListener()
 		stopSelectionWatch()
 	}
 }

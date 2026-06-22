@@ -5,6 +5,7 @@
 // bar が再 inject されても DOM 寿命に依存しない (= document レベルで capture)。
 
 import { applyFilter, filterState } from './animatorPanelUI'
+import { addDocumentListener } from './popoutBus'
 
 const SEARCH_SELECTOR = '.anim-ux-search'
 
@@ -15,8 +16,9 @@ export function installSearchHandler(): () => void {
 		filterState.query = (target as HTMLInputElement).value
 		applyFilter()
 	}
-	document.addEventListener('input', handler, true)
+	// popout 中は子窓 document にも自動 attach (= TIMELINE 別窓内の検索入力も拾う)
+	const removeListener = addDocumentListener('input', handler, true)
 	return () => {
-		document.removeEventListener('input', handler, true)
+		removeListener()
 	}
 }
