@@ -14,6 +14,7 @@
 //   - body 直下に置けば panel 階層と無関係、 viewport 基準で常に最前面に出せる
 
 import { findAnimatorList, registerRefreshCallback } from './animatorPanelUI'
+import { addDocumentListener, getDocuments } from './popoutBus'
 
 type OutlinerLike = { name?: string; parent?: unknown }
 
@@ -75,10 +76,13 @@ function clearAllBreadcrumbs(): void {
 
 // ----- 独自 tooltip element (= body 直下 fixed) ------------------------------
 
-function ensureTooltipElement(): HTMLElement {
-	let el = document.getElementById(TOOLTIP_ID)
+// popout 中は hover 対象の span が子窓に居て、 getBoundingClientRect も子窓 viewport 基準。
+// tooltip element も同じ document に作って append しないと、 座標がズレるか body 直下なのに
+// 別 document で表示できない (= Codex 確認)。 ownerDocument を起点に揃える。
+function ensureTooltipElement(doc: Document): HTMLElement {
+	let el = doc.getElementById(TOOLTIP_ID)
 	if (!el) {
-		el = document.createElement('div')
+		el = doc.createElement('div')
 		el.id = TOOLTIP_ID
 		el.style.cssText = [
 			'position: fixed',
@@ -95,30 +99,37 @@ function ensureTooltipElement(): HTMLElement {
 			'white-space: nowrap',
 			'box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35)',
 		].join('; ')
-		document.body.appendChild(el)
+		doc.body.appendChild(el)
 	}
 	return el
 }
 
 function showTooltipFor(target: HTMLElement, text: string): void {
-	const el = ensureTooltipElement()
+	const doc = target.ownerDocument ?? document
+	const win = doc.defaultView ?? window
+	const el = ensureTooltipElement(doc)
 	const rect = target.getBoundingClientRect()
 	el.textContent = text
 	el.style.display = 'block'
 	// span 左端の左 12px に tooltip の右端を揃える (= span の左隣に密接配置)
 	el.style.left = ''
-	el.style.right = `${Math.max(8, window.innerWidth - rect.left + 12)}px`
+	el.style.right = `${Math.max(8, win.innerWidth - rect.left + 12)}px`
 	el.style.top = `${rect.top + rect.height / 2}px`
 	el.style.transform = 'translateY(-50%)'
 }
 
+// 親 + 子窓両方の tooltip を hide (= popout 状態遷移過渡期に両方残らないように)
 function hideTooltip(): void {
-	const el = document.getElementById(TOOLTIP_ID)
-	if (el) el.style.display = 'none'
+	for (const doc of getDocuments()) {
+		const el = doc.getElementById(TOOLTIP_ID)
+		if (el) el.style.display = 'none'
+	}
 }
 
 function removeTooltipElement(): void {
-	document.getElementById(TOOLTIP_ID)?.remove()
+	for (const doc of getDocuments()) {
+		doc.getElementById(TOOLTIP_ID)?.remove()
+	}
 }
 
 // ----- event handlers (= delegated mouseover / mouseout) --------------------
@@ -143,12 +154,13 @@ function onMouseOut(e: MouseEvent): void {
 export function installBreadcrumbs(): () => void {
 	const unregister = registerRefreshCallback(applyBreadcrumbs)
 	applyBreadcrumbs()
-	document.addEventListener('mouseover', onMouseOver, true)
-	document.addEventListener('mouseout', onMouseOut, true)
+	// popout 中は子窓 document にも自動 attach (= TIMELINE 別窓内の hover も拾う)
+	const removeOver = addDocumentListener('mouseover', onMouseOver, true)
+	const removeOut = addDocumentListener('mouseout', onMouseOut, true)
 	return () => {
 		unregister()
-		document.removeEventListener('mouseover', onMouseOver, true)
-		document.removeEventListener('mouseout', onMouseOut, true)
+		removeOver()
+		removeOut()
 		hideTooltip()
 		removeTooltipElement()
 		clearAllBreadcrumbs()

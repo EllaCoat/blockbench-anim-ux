@@ -20,6 +20,7 @@
 //     left = head_width + time * size + 8 (= BB の keyframe 配置式と完全一致、 timeline.js:1775 参照)
 
 import { filterState, registerRefreshCallback } from './animatorPanelUI'
+import { findElementByIdInDocs, queryAllInDocs } from './popoutBus'
 import { syncToggleVisuals } from './toggles'
 
 declare const Timeline:
@@ -85,13 +86,15 @@ function formatTime(t: number | undefined): string {
 }
 
 function updateAbLoopStatus(): void {
-	const span = document.querySelector<HTMLElement>('.anim-ux-ab-status')
-	if (!span) return
-	if (loopStart === undefined && loopEnd === undefined) {
-		span.textContent = '—'
-		return
-	}
-	span.textContent = `A:${formatTime(loopStart)} B:${formatTime(loopEnd)}`
+	// popout 中は span が子窓に居る (= filter bar 諸共 TIMELINE container 内)。
+	// queryAllInDocs で親 + 子窓両方を更新 (= 通常は片方にしか居ないが、 復帰タイミング過渡期も含めて安全に)。
+	const spans = queryAllInDocs<HTMLElement>('.anim-ux-ab-status')
+	if (!spans.length) return
+	const text =
+		loopStart === undefined && loopEnd === undefined
+			? '—'
+			: `A:${formatTime(loopStart)} B:${formatTime(loopEnd)}`
+	for (const span of spans) span.textContent = text
 }
 
 function tick(): void {
@@ -155,8 +158,10 @@ function ensureMarkerStyle(): void {
 
 // #timeline_body_inner 内に A / B 縦線 div を attach (= 既に同じ親にあれば再利用)。
 // 親が再 render で消える / 切替えられたケースを毎呼出 で吸収 (= filter bar と同じ思想)。
+// popout 中は TIMELINE 諸共 inner が子窓に居るので popoutBus 経由で検索 (= getElementById hook で
+// メイン経路の document.getElementById も子窓 fallback されるが、 明示経路の方が意図が読める)。
 function ensureMarkers(): void {
-	const inner = document.getElementById('timeline_body_inner')
+	const inner = findElementByIdInDocs('timeline_body_inner')
 	if (!inner) return
 	if (!markerA || markerA.parentElement !== inner) {
 		if (markerA?.parentElement) markerA.remove()
