@@ -15,7 +15,7 @@ import { installTogglesHandler } from './toggles'
 declare const Plugin: { register(id: string, opts: Record<string, unknown>): void }
 
 const PLUGIN_ID = 'anim_ux'
-const PLUGIN_VERSION = '0.5.0'
+const PLUGIN_VERSION = '0.6.0'
 
 let cleanups: Array<() => void> = []
 

@@ -107,11 +107,12 @@ export function addDocumentListener(
 }
 
 export function bindPopoutChild(doc: Document | null): void {
+	const prev = childDoc
 	// 旧子窓があれば全 listener を detach (= popout 状態遷移、 リソースリーク防止)
-	if (childDoc && childDoc !== doc) {
+	if (prev && prev !== doc) {
 		for (const l of listeners) {
 			try {
-				childDoc.removeEventListener(l.type, l.fn, l.opts)
+				prev.removeEventListener(l.type, l.fn, l.opts)
 			} catch {
 				/* noop */
 			}
@@ -126,6 +127,27 @@ export function bindPopoutChild(doc: Document | null): void {
 			} catch (e) {
 				console.warn(`[anim_ux:popoutBus] bind child(${l.type}) failed`, e)
 			}
+		}
+	}
+	// popout 状態遷移を外部 plugin (= AJ keyframeEasingVisualMod 等) に通知する。
+	// 旧 ≠ 新 すべての遷移 (= 旧 → 新 / 旧 → null / null → 新) で適切に発火させる。
+	// event target = window で global、 detail = 該当 document。 listener 側は addEventListener で購読。
+	if (prev && prev !== doc) {
+		try {
+			window.dispatchEvent(
+				new CustomEvent('animux:popout-close', { detail: { document: prev } }),
+			)
+		} catch (e) {
+			console.warn('[anim_ux:popoutBus] popout-close dispatch failed', e)
+		}
+	}
+	if (doc && doc !== prev) {
+		try {
+			window.dispatchEvent(
+				new CustomEvent('animux:popout-open', { detail: { document: doc } }),
+			)
+		} catch (e) {
+			console.warn('[anim_ux:popoutBus] popout-open dispatch failed', e)
 		}
 	}
 }
