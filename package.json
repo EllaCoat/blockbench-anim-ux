@@ -1,6 +1,6 @@
 {
   "name": "blockbench-anim-ux",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": false,
   "description": "Blockbench plugin: animator panel search, key-only filter, 3D-selection sync, keyframe-jump shortcuts, A-B loop playback with timeline markers, and onion skin with adjustable range for animating models with many bones.",
   "type": "module",
