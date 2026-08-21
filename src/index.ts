@@ -6,6 +6,7 @@ import { installAbLoop } from './abLoop'
 import { installAnimatorPanel } from './animatorPanel'
 import { installBreadcrumbs } from './breadcrumb'
 import { installKeyframeJump } from './keyframeJump'
+import { installExplicitTexelLayout } from './installExplicitTexelLayout'
 import { installOnionSkin } from './onionSkin'
 import { installTimelineWindow, timelineWindowService } from './timelineWindow'
 
@@ -15,7 +16,7 @@ declare const Blockbench:
 	| undefined
 
 const PLUGIN_ID = 'anim_ux'
-const PLUGIN_VERSION = '0.6.0'
+const PLUGIN_VERSION = '0.7.0'
 
 let cleanups: Array<() => void> = []
 
@@ -55,7 +56,7 @@ Plugin.register(PLUGIN_ID, {
 	title: 'Animation UX',
 	author: 'EllaCoat',
 	description:
-		'Animator panel search, filter, 3D-selection sync, keyframe-jump shortcuts, A-B loop playback with timeline markers, onion skin with adjustable range, and multi-window state sync.',
+		'Animator panel workflow, detachable Timeline, explicit-texel cube UV layout, keyframe navigation, A-B loop, and onion skin.',
 	icon: 'search',
 	variant: 'desktop',
 	version: PLUGIN_VERSION,
@@ -69,6 +70,7 @@ Plugin.register(PLUGIN_ID, {
 			installed.push(installAbLoop())
 			installed.push(installOnionSkin())
 			installed.push(installTimelineWindow())
+			installed.push(installExplicitTexelLayout())
 			cleanups = installed
 		} catch (error) {
 			for (const cleanup of installed.reverse()) {

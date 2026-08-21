@@ -1,0 +1,378 @@
+import {
+	EXPLICIT_TEXEL_FACES,
+	ExplicitTexelLayoutError,
+	LayoutTexture,
+	planExplicitTexelLayout,
+	type ExplicitTexelFace,
+	type ExplicitTexelLayoutPlan,
+	type TexelDimensions,
+} from './explicitTexelLayout'
+
+interface BlockbenchFace {
+	texture?: unknown
+	uv: [number, number, number, number]
+	rotation?: number
+	getTexture?: () => unknown
+}
+
+interface BlockbenchCube {
+	uuid?: string
+	selected?: boolean
+	faces?: Partial<Record<ExplicitTexelFace, BlockbenchFace>>
+	autouv?: number
+	box_uv?: boolean
+	mirror_uv?: boolean
+	[key: string]: unknown
+}
+
+interface BlockbenchTexture {
+	uuid?: string
+	id?: string
+	name?: string
+	width?: number
+	height?: number
+	frameCount?: number
+	uv_width?: number
+	uv_height?: number
+	img?: { naturalWidth?: number; naturalHeight?: number; width?: number; height?: number }
+	canvas?: { width?: number; height?: number }
+	getUVWidth?: () => number
+	getUVHeight?: () => number
+	[key: string]: unknown
+}
+
+export interface ExplicitTexelLayoutRequest {
+	textureId: string
+	dimensions: TexelDimensions
+}
+
+/**
+ * The only host seam needed by the algorithm. Keeping Blockbench globals on
+ * the other side makes atomicity testable without a renderer or Electron.
+ */
+export interface ExplicitTexelLayoutHost {
+	selectedCubes(): readonly BlockbenchCube[]
+	allCubes(): readonly BlockbenchCube[]
+	textures(): readonly BlockbenchTexture[]
+	textureId(value: unknown): string | null
+	textureLayout(texture: BlockbenchTexture): LayoutTexture
+	beginUndo(cube: BlockbenchCube): void
+	finishUndo(): void
+	cancelUndo(): void
+	refresh(cube: BlockbenchCube): void
+}
+
+declare const Action:
+	| (new (id: string, options: Record<string, unknown>) => { delete(): void })
+	| undefined
+declare const Dialog:
+	| (new (options: Record<string, unknown>) => { show(): void; hide?(): void })
+	| undefined
+declare const MenuBar:
+	| {
+			menus?: Record<string, { addAction(action: unknown): void; removeAction(action: unknown): void } | undefined>
+	  }
+	| undefined
+declare const Cube: { selected?: BlockbenchCube[]; all?: BlockbenchCube[] } | undefined
+declare const Texture: { all?: BlockbenchTexture[]; selected?: BlockbenchTexture } | undefined
+declare const Project: { textures?: BlockbenchTexture[] } | undefined
+declare const Undo:
+	| {
+			initEdit(aspects: Record<string, unknown>): void
+			finishEdit(message: string): void
+			cancelEdit(revertChanges?: boolean): void
+	  }
+	| undefined
+declare const Canvas:
+	| {
+			updateView?(options: Record<string, unknown>): void
+			updateAll?(): void
+	  }
+	| undefined
+declare const UVEditor: { loadData?(): void } | undefined
+declare const Blockbench:
+	| { showQuickMessage?(message: string, duration?: number): void }
+	| undefined
+
+function noChange(message: string): never {
+	throw new ExplicitTexelLayoutError('invalid-input', message)
+}
+
+function asId(value: unknown): string | null {
+	if (typeof value === 'string' && value.length > 0) return value
+	if (!value || typeof value !== 'object') return null
+	const record = value as { uuid?: unknown; id?: unknown }
+	if (typeof record.uuid === 'string' && record.uuid.length > 0) return record.uuid
+	if (typeof record.id === 'string' && record.id.length > 0) return record.id
+	return null
+}
+
+function firstPositiveNumber(...values: unknown[]): number | undefined {
+	for (const value of values) {
+		if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value
+	}
+	return undefined
+}
+
+function blockbenchHost(): ExplicitTexelLayoutHost {
+	return {
+		selectedCubes: () =>
+			(typeof Cube !== 'undefined' && Array.isArray(Cube?.selected) ? Cube.selected : []),
+		allCubes: () =>
+			(typeof Cube !== 'undefined' && Array.isArray(Cube?.all) ? Cube.all : []),
+		textures: () => {
+			const projectTextures = typeof Project !== 'undefined' ? Project?.textures : undefined
+			if (Array.isArray(projectTextures)) return projectTextures
+			return typeof Texture !== 'undefined' && Array.isArray(Texture?.all) ? Texture.all : []
+		},
+		textureId: (value: unknown) => asId(value),
+		textureLayout: (texture: BlockbenchTexture): LayoutTexture => {
+			if (typeof texture.frameCount === 'number' && texture.frameCount > 1) {
+				noChange('Animated textures are not supported by explicit texel UV layout.')
+			}
+			const pixelWidth = firstPositiveNumber(
+				texture.img?.naturalWidth,
+				texture.canvas?.width,
+				texture.img?.width,
+				texture.width,
+			)
+			const pixelHeight = firstPositiveNumber(
+				texture.img?.naturalHeight,
+				texture.canvas?.height,
+				texture.img?.height,
+				texture.height,
+			)
+			const uvWidth = firstPositiveNumber(
+				typeof texture.getUVWidth === 'function' ? texture.getUVWidth() : undefined,
+				texture.uv_width,
+				texture.width,
+			)
+			const uvHeight = firstPositiveNumber(
+				typeof texture.getUVHeight === 'function' ? texture.getUVHeight() : undefined,
+				texture.uv_height,
+				texture.height,
+			)
+		if (!pixelWidth || !pixelHeight || !uvWidth || !uvHeight) {
+				noChange('The selected texture has no readable pixel and UV dimensions.')
+			}
+			return { pixelWidth, pixelHeight, uvWidth, uvHeight }
+		},
+		beginUndo: (cube: BlockbenchCube) => {
+			if (typeof Undo === 'undefined' || !Undo) noChange('Blockbench Undo is unavailable.')
+			Undo.initEdit({ elements: [cube], uv_only: true })
+		},
+		finishUndo: () => {
+			if (typeof Undo === 'undefined' || !Undo) noChange('Blockbench Undo is unavailable.')
+			Undo.finishEdit('Explicit texel UV layout')
+		},
+		cancelUndo: () => {
+			if (typeof Undo !== 'undefined' && Undo) Undo.cancelEdit(true)
+		},
+		refresh: (cube: BlockbenchCube) => {
+			try {
+				const preview = cube.preview_controller as
+					| { updateFaces?(value: BlockbenchCube): void; updateUV?(value: BlockbenchCube): void }
+					| undefined
+				preview?.updateFaces?.(cube)
+				preview?.updateUV?.(cube)
+				Canvas?.updateView?.({
+					elements: [cube],
+					element_aspects: { faces: true, uv: true, geometry: false },
+				})
+				Canvas?.updateAll?.()
+				UVEditor?.loadData?.()
+			} catch (error) {
+				console.warn('[anim_ux] explicit texel UV refresh failed', error)
+			}
+		},
+	}
+}
+
+function faceFor(cube: BlockbenchCube, face: ExplicitTexelFace): BlockbenchFace {
+	const value = cube.faces?.[face]
+	if (!value || !Array.isArray(value.uv) || value.uv.length !== 4) {
+		noChange(`Selected cube is missing a valid ${face} face.`)
+	}
+	return value
+}
+
+function faceUsesTexture(
+	host: ExplicitTexelLayoutHost,
+	face: BlockbenchFace,
+	texture: BlockbenchTexture,
+	textureId: string,
+): boolean {
+	const value = typeof face.getTexture === 'function' ? face.getTexture() : face.texture
+	if (value === null || value === false || value === undefined) return false
+	if (value === texture) return true
+	const valueId = typeof value === 'string' ? value : host.textureId(value)
+	return valueId === textureId
+}
+
+/**
+ * Preflight and apply one complete six-face layout. All validation and
+ * packing happen before `beginUndo`; the mutation section is one undo entry.
+ */
+export function applyExplicitTexelLayout(
+	request: ExplicitTexelLayoutRequest,
+	host: ExplicitTexelLayoutHost = blockbenchHost(),
+): ExplicitTexelLayoutPlan {
+	if (!request || typeof request.textureId !== 'string' || request.textureId.length === 0) {
+		noChange('An existing texture must be selected explicitly.')
+	}
+	const selected = [...host.selectedCubes()]
+	if (selected.length !== 1) {
+		noChange('Select exactly one cube before creating an explicit texel layout.')
+	}
+	const cube = selected[0]
+	const texture = host.textures().find((candidate) => host.textureId(candidate) === request.textureId)
+	if (!texture) noChange(`Texture "${request.textureId}" was not found in the current project.`)
+	const textureId = host.textureId(texture)
+	if (!textureId) noChange('The selected texture has no stable Blockbench identifier.')
+
+	const occupied: Array<{ uv: [number, number, number, number] }> = []
+	for (const otherCube of host.allCubes()) {
+		if (otherCube === cube) continue
+		for (const face of EXPLICIT_TEXEL_FACES) {
+			const otherFace = faceFor(otherCube, face)
+			if (faceUsesTexture(host, otherFace, texture, textureId)) {
+				occupied.push({ uv: [...otherFace.uv] as [number, number, number, number] })
+			}
+		}
+	}
+
+	const plan = planExplicitTexelLayout({
+		dimensions: request.dimensions,
+		texture: host.textureLayout(texture),
+		occupied,
+	})
+
+	let undoOpen = false
+	try {
+		host.beginUndo(cube)
+		undoOpen = true
+		cube.box_uv = false
+		cube.autouv = 0
+		for (const face of EXPLICIT_TEXEL_FACES) {
+			const targetFace = faceFor(cube, face)
+			targetFace.texture = textureId
+			targetFace.uv = [...plan.faces[face].uv] as [number, number, number, number]
+			targetFace.rotation = 0
+		}
+		host.finishUndo()
+		undoOpen = false
+	} catch (error) {
+		if (undoOpen) {
+			try {
+				host.cancelUndo()
+			} catch {
+				// Preserve the original mutation error; the host owns rollback details.
+			}
+		}
+		throw error
+	}
+
+	host.refresh(cube)
+	return plan
+}
+
+function notify(message: string): void {
+	if (typeof Blockbench !== 'undefined' && Blockbench?.showQuickMessage) {
+		Blockbench.showQuickMessage(message, 4000)
+	} else {
+		console.warn(`[anim_ux] ${message}`)
+	}
+}
+
+let openDialog: { hide?(): void } | undefined
+
+export function openExplicitTexelLayoutDialog(): void {
+	if (typeof Dialog === 'undefined' || !Dialog) return
+	const textures = blockbenchHost().textures().filter((texture) => asId(texture))
+	if (typeof Cube === 'undefined' || !Cube || Cube.selected?.length !== 1) {
+		notify('Select exactly one cube before opening explicit texel UV layout.')
+		return
+	}
+	if (textures.length === 0) {
+		notify('Create or load an existing texture before opening explicit texel UV layout.')
+		return
+	}
+	const options: Record<string, string> = {}
+	for (const texture of textures) {
+		const id = asId(texture)
+		if (id) options[id] = texture.name || id
+	}
+	const selectedTexture = typeof Texture !== 'undefined' ? Texture?.selected : undefined
+	const defaultTextureId = asId(selectedTexture) && options[asId(selectedTexture)!]
+		? asId(selectedTexture)!
+		: Object.keys(options)[0]
+
+	const dialog = new Dialog({
+		id: 'anim_ux_explicit_texel_layout',
+		title: 'Anim UX: Explicit Texel UV Layout',
+		form: {
+			texture: {
+				type: 'select',
+				label: 'Existing texture',
+				options,
+				value: defaultTextureId,
+			},
+			x: { type: 'number', label: 'X texels', value: 1, min: 1, step: 1 },
+			y: { type: 'number', label: 'Y texels', value: 1, min: 1, step: 1 },
+			z: { type: 'number', label: 'Z texels', value: 1, min: 1, step: 1 },
+		},
+		onConfirm(result: { texture: string; x: number; y: number; z: number }) {
+			try {
+				const plan = applyExplicitTexelLayout({
+					textureId: result.texture,
+					dimensions: { x: Number(result.x), y: Number(result.y), z: Number(result.z) },
+				})
+				notify(`Placed six UV faces at texel ${plan.origin.x}, ${plan.origin.y}.`)
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error)
+				notify(message)
+			}
+		},
+	})
+	openDialog = dialog
+	dialog.show()
+}
+
+/** Install the UV action and return the complete plugin cleanup function. */
+export function installExplicitTexelLayout(): () => void {
+	let action: { delete(): void } | undefined
+	if (typeof Action !== 'undefined' && Action) {
+		action = new Action('anim_ux_explicit_texel_layout', {
+			name: 'Anim UX: Explicit Texel UV Layout...',
+			description: 'Place one selected cube on an existing texture using explicit texel dimensions.',
+			icon: 'grid_on',
+			category: 'uv',
+			condition: { modes: ['edit'] },
+			click: openExplicitTexelLayoutDialog,
+		})
+		const uvMenu = typeof MenuBar !== 'undefined' ? MenuBar?.menus?.uv : undefined
+		uvMenu?.addAction(action)
+	}
+
+	return () => {
+		try {
+			openDialog?.hide?.()
+		} catch {
+			// Dialog cleanup is best effort during plugin unload.
+		}
+		openDialog = undefined
+		if (action) {
+			const uvMenu = typeof MenuBar !== 'undefined' ? MenuBar?.menus?.uv : undefined
+			try {
+				uvMenu?.removeAction(action)
+			} catch {
+				// The menu may already be gone while Blockbench is shutting down.
+			}
+			try {
+				action.delete()
+			} catch (error) {
+				console.warn('[anim_ux] explicit texel UV action cleanup failed', error)
+			}
+		}
+	}
+}
