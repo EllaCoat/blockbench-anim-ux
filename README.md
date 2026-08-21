@@ -7,6 +7,17 @@ and Adobe After Effects (Shy / property-based filtering).
 
 ## Features
 
+### v0.7 — Timeline lifecycle + explicit texel UV layout
+
+- **Single-owner Timeline window lifecycle** — pop-out state, document listeners,
+  Blockbench compatibility bridges, restoration, and cleanup now share one lifecycle.
+- **Narrow companion API** — `window.AnimUX.timeline.subscribeDocuments(listener)`
+  immediately reports the parent / pop-out document set and follows later transitions.
+  Plugins loaded before anim_ux can listen for Blockbench's `animux:ready` event.
+- **Explicit Texel UV Layout** — choose one cube, one existing texture, and integer
+  `{x, y, z}` texel dimensions. The action places a standard six-face cube net in
+  unused texture space without changing geometry or bitmap content, in one Undo entry.
+
 ### v0.1 — Animator panel UX
 
 - **A. Incremental search** — filter animator rows by name (case-insensitive partial match)
@@ -25,19 +36,12 @@ and Adobe After Effects (Shy / property-based filtering).
 - **Onion Skin Range dialog** — adjust onion skin span (±1〜5 frames) with linear distance fade; values persist in localStorage
 - **A-B loop timeline markers** — vertical lines on the timeline (A green / B red), scroll & zoom aware
 
-### v0.5 — Pop-out completeness + AnimUX optional API
+### v0.5 — Pop-out completeness
 
 - **Ctrl + wheel zoom inside the pop-out** — the v0.4 limitation is gone. Wheel events
   in the child window are mirrored as `mousewheel` to the in-place handler so the
   pop-out timeline behaves identically to the docked one (zoom, vertical scroll,
   Shift-horizontal scroll all work).
-- **`window.AnimUX` optional API** — companion plugins (e.g. AnimatedJava's keyframe
-  hover popup) can opt-in to pop-out-aware DOM hooks without depending on anim_ux
-  being installed:
-  - `AnimUX.addDocumentListener(type, fn, opts)` — bind to the parent document, plus
-    the pop-out child document if one is open; returns a detach callback.
-  - `AnimUX.getActivePopoutDocument()` — the pop-out child `Document` if open, else `null`.
-  - `AnimUX.version` — semver string for feature detection.
 
 ### v0.4 — TIMELINE pop-out (experimental)
 
@@ -77,6 +81,10 @@ stays on the primary window.
   global shortcut.
 
 ## Build
+
+The repository pins pnpm and rejects newly published dependency versions for seven days.
+Dependency install scripts are denied unless explicitly listed in `pnpm-workspace.yaml`;
+currently only `esbuild` is allowed.
 
 ```bash
 pnpm install

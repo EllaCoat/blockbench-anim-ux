@@ -1,12 +1,15 @@
 {
   "name": "blockbench-anim-ux",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": false,
-  "description": "Blockbench plugin: animator panel search, key-only filter, 3D-selection sync, keyframe-jump shortcuts, A-B loop playback with timeline markers, and onion skin with adjustable range for animating models with many bones.",
+  "description": "Blockbench plugin: detachable Timeline, animator workflow tools, and explicit-texel cube UV layout.",
   "type": "module",
+  "packageManager": "pnpm@10.34.5",
   "scripts": {
     "build": "node build.mjs",
     "dev": "node build.mjs --dev",
+    "test:build": "esbuild src/explicitTexelLayout.ts src/installExplicitTexelLayout.ts --bundle --format=esm --platform=node --outdir=dist-test --out-extension:.js=.mjs",
+    "test": "pnpm test:build && node --test test/*.test.mjs",
     "build:push": "node build.mjs && /home/ubuntu/aj-workspace/scripts/push-to-laptop.sh dist/anim_ux.js anim_ux.js --yes"
   },
   "devDependencies": {

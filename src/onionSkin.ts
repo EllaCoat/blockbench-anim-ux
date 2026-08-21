@@ -27,7 +27,7 @@
 //       * material は past/future で 1 つずつ共有 (= ghost ごとに作らず dispose も不要)
 //       * matrixAutoUpdate=false + 手動 updateMatrix() で内部 matrix 計算も最小化
 
-import { filterState } from './animatorPanelUI'
+import { filterState } from './animatorPanel'
 
 declare const Canvas:
 	| { scene?: { add(o: unknown): void; remove(o: unknown): void; updateMatrixWorld?(force?: boolean): void } }

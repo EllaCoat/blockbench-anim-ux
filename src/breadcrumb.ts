@@ -13,8 +13,8 @@
 //     の方が BB の panel システムで上位 stacking context を持ち、 子の z-index がそれを超えられない
 //   - body 直下に置けば panel 階層と無関係、 viewport 基準で常に最前面に出せる
 
-import { findAnimatorList, registerRefreshCallback } from './animatorPanelUI'
-import { addDocumentListener, getDocuments } from './popoutBus'
+import { findAnimatorList, registerRefreshCallback } from './animatorPanel'
+import { addTimelineDocumentListener, getTimelineDocuments } from './timelineWindow'
 
 type OutlinerLike = { name?: string; parent?: unknown }
 
@@ -120,14 +120,14 @@ function showTooltipFor(target: HTMLElement, text: string): void {
 
 // 親 + 子窓両方の tooltip を hide (= popout 状態遷移過渡期に両方残らないように)
 function hideTooltip(): void {
-	for (const doc of getDocuments()) {
+	for (const doc of getTimelineDocuments()) {
 		const el = doc.getElementById(TOOLTIP_ID)
 		if (el) el.style.display = 'none'
 	}
 }
 
 function removeTooltipElement(): void {
-	for (const doc of getDocuments()) {
+	for (const doc of getTimelineDocuments()) {
 		doc.getElementById(TOOLTIP_ID)?.remove()
 	}
 }
@@ -155,8 +155,8 @@ export function installBreadcrumbs(): () => void {
 	const unregister = registerRefreshCallback(applyBreadcrumbs)
 	applyBreadcrumbs()
 	// popout 中は子窓 document にも自動 attach (= TIMELINE 別窓内の hover も拾う)
-	const removeOver = addDocumentListener('mouseover', onMouseOver, true)
-	const removeOut = addDocumentListener('mouseout', onMouseOut, true)
+	const removeOver = addTimelineDocumentListener('mouseover', onMouseOver, true)
+	const removeOut = addTimelineDocumentListener('mouseout', onMouseOut, true)
 	return () => {
 		unregister()
 		removeOver()

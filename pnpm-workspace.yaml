@@ -1,4 +1,11 @@
-# pnpm 設定 (= pnpm 11+ で `package.json` の `pnpm` field が廃止されたため、 こちらで管理)
-# esbuild の build script (= postinstall) は global の strictDepBuilds に弾かれるため allow 登録。
+# 依存の新規解決は公開から7日待ち、transitiveなGit/Tarball依存を拒否する。
+minimumReleaseAge: 10080
+blockExoticSubdeps: true
+
+# 未審査のinstall scriptは警告で流さず失敗させ、esbuildだけを許可する。
+strictDepBuilds: true
 allowBuilds:
   esbuild: true
+
+# cooldownとallowBuildsが有効なpnpmをpackage.jsonと完全一致で使う。
+packageManagerStrictVersion: true
