@@ -182,14 +182,22 @@ function cube(name = 'target') {
 	}
 }
 
-function hostFor(target, { allCubes = [target], layout = texture(16, 16), failOnFace } = {}) {
+function hostFor(target, {
+	allCubes = [target],
+	failOnFace,
+	layout = texture(16, 16),
+	nonCubeFaces = [],
+	supportsFaceTextureAssignment = true,
+} = {}) {
 	const chosenTexture = { uuid: 'chosen-texture' }
 	const calls = []
 	let before
 	const host = {
 		selectedCubes: () => [target],
 		allCubes: () => allCubes,
+		nonCubeFaces: () => nonCubeFaces,
 		textures: () => [chosenTexture],
+		supportsFaceTextureAssignment: () => supportsFaceTextureAssignment,
 		textureId: value => typeof value === 'string' ? value : value?.uuid ?? null,
 		textureLayout: () => layout,
 		beginUndo: () => {
@@ -244,6 +252,36 @@ test('preflight failure opens no Undo entry and leaves the cube unchanged', () =
 	assert.throws(
 		() => applyExplicitTexelLayout({ textureId: 'chosen-texture', dimensions: dimensions(1, 1, 1) }, host),
 		(error) => error?.code === 'no-space' && error?.noChange === true,
+	)
+	assert.deepEqual(calls, [])
+	assert.deepEqual(target, before)
+})
+
+test('rejects a texture used by a non-cube element before opening Undo', () => {
+	const target = cube()
+	const before = structuredClone(target)
+	const { host, calls } = hostFor(target, {
+		nonCubeFaces: [{ texture: 'chosen-texture' }],
+	})
+
+	assert.throws(
+		() => applyExplicitTexelLayout({ textureId: 'chosen-texture', dimensions: dimensions(1, 1, 1) }, host),
+		(error) => error?.code === 'invalid-input' && error?.noChange === true,
+	)
+	assert.deepEqual(calls, [])
+	assert.deepEqual(target, before)
+})
+
+test('rejects formats that override per-face texture assignment before opening Undo', () => {
+	const target = cube()
+	const before = structuredClone(target)
+	const { host, calls } = hostFor(target, {
+		supportsFaceTextureAssignment: false,
+	})
+
+	assert.throws(
+		() => applyExplicitTexelLayout({ textureId: 'chosen-texture', dimensions: dimensions(1, 1, 1) }, host),
+		(error) => error?.code === 'invalid-input' && error?.noChange === true,
 	)
 	assert.deepEqual(calls, [])
 	assert.deepEqual(target, before)

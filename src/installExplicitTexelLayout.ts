@@ -8,11 +8,18 @@ import {
 	type TexelDimensions,
 } from './explicitTexelLayout'
 
-interface BlockbenchFace {
+interface TextureBearingFace {
 	texture?: unknown
+	getTexture?: () => unknown
+}
+
+interface BlockbenchFace extends TextureBearingFace {
 	uv: [number, number, number, number]
 	rotation?: number
-	getTexture?: () => unknown
+}
+
+interface BlockbenchElement {
+	faces?: Record<string, TextureBearingFace | undefined>
 }
 
 interface BlockbenchCube {
@@ -53,7 +60,9 @@ export interface ExplicitTexelLayoutRequest {
 export interface ExplicitTexelLayoutHost {
 	selectedCubes(): readonly BlockbenchCube[]
 	allCubes(): readonly BlockbenchCube[]
+	nonCubeFaces(): readonly TextureBearingFace[]
 	textures(): readonly BlockbenchTexture[]
+	supportsFaceTextureAssignment(): boolean
 	textureId(value: unknown): string | null
 	textureLayout(texture: BlockbenchTexture): LayoutTexture
 	beginUndo(cube: BlockbenchCube): void
@@ -76,6 +85,8 @@ declare const MenuBar:
 declare const Cube: { selected?: BlockbenchCube[]; all?: BlockbenchCube[] } | undefined
 declare const Texture: { all?: BlockbenchTexture[]; selected?: BlockbenchTexture } | undefined
 declare const Project: { textures?: BlockbenchTexture[] } | undefined
+declare const Outliner: { elements?: BlockbenchElement[] } | undefined
+declare const Format: { single_texture?: boolean; per_group_texture?: boolean } | undefined
 declare const Undo:
 	| {
 			initEdit(aspects: Record<string, unknown>): void
@@ -120,11 +131,20 @@ function blockbenchHost(): ExplicitTexelLayoutHost {
 			(typeof Cube !== 'undefined' && Array.isArray(Cube?.selected) ? Cube.selected : []),
 		allCubes: () =>
 			(typeof Cube !== 'undefined' && Array.isArray(Cube?.all) ? Cube.all : []),
+		nonCubeFaces: () => {
+			const cubes = new Set(typeof Cube !== 'undefined' && Array.isArray(Cube?.all) ? Cube.all : [])
+			const elements = typeof Outliner !== 'undefined' && Array.isArray(Outliner?.elements) ? Outliner.elements : []
+			return elements
+				.filter((element) => !cubes.has(element as BlockbenchCube))
+				.flatMap((element) => Object.values(element.faces ?? {}).filter((face): face is TextureBearingFace => Boolean(face)))
+		},
 		textures: () => {
 			const projectTextures = typeof Project !== 'undefined' ? Project?.textures : undefined
 			if (Array.isArray(projectTextures)) return projectTextures
 			return typeof Texture !== 'undefined' && Array.isArray(Texture?.all) ? Texture.all : []
 		},
+		supportsFaceTextureAssignment: () =>
+			!(typeof Format !== 'undefined' && (Format?.single_texture || Format?.per_group_texture)),
 		textureId: (value: unknown) => asId(value),
 		textureLayout: (texture: BlockbenchTexture): LayoutTexture => {
 			if (typeof texture.frameCount === 'number' && texture.frameCount > 1) {
@@ -198,7 +218,7 @@ function faceFor(cube: BlockbenchCube, face: ExplicitTexelFace): BlockbenchFace 
 
 function faceUsesTexture(
 	host: ExplicitTexelLayoutHost,
-	face: BlockbenchFace,
+	face: TextureBearingFace,
 	texture: BlockbenchTexture,
 	textureId: string,
 ): boolean {
@@ -229,6 +249,12 @@ export function applyExplicitTexelLayout(
 	if (!texture) noChange(`Texture "${request.textureId}" was not found in the current project.`)
 	const textureId = host.textureId(texture)
 	if (!textureId) noChange('The selected texture has no stable Blockbench identifier.')
+	if (!host.supportsFaceTextureAssignment()) {
+		noChange('Explicit texel UV layout requires a format with per-face texture assignment.')
+	}
+	if (host.nonCubeFaces().some((face) => faceUsesTexture(host, face, texture, textureId))) {
+		noChange('The selected texture is used by a non-cube element; its UV occupation cannot be changed safely.')
+	}
 
 	const occupied: Array<{ uv: [number, number, number, number] }> = []
 	for (const otherCube of host.allCubes()) {
