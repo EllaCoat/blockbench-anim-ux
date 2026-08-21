@@ -19,9 +19,8 @@
 //     zoom 追従用に A/B のいずれかが set されてる間だけ別 rAF を回す = idle 時 0 cost)
 //     left = head_width + time * size + 8 (= BB の keyframe 配置式と完全一致、 timeline.js:1775 参照)
 
-import { filterState, registerRefreshCallback } from './animatorPanelUI'
-import { findElementByIdInDocs, queryAllInDocs } from './popoutBus'
-import { syncToggleVisuals } from './toggles'
+import { filterState, registerRefreshCallback, registerToggleEffect, syncToggleVisuals } from './animatorPanel'
+import { findTimelineElementById, queryTimelineDocuments } from './timelineWindow'
 
 declare const Timeline:
 	| {
@@ -88,7 +87,7 @@ function formatTime(t: number | undefined): string {
 function updateAbLoopStatus(): void {
 	// popout 中は span が子窓に居る (= filter bar 諸共 TIMELINE container 内)。
 	// queryAllInDocs で親 + 子窓両方を更新 (= 通常は片方にしか居ないが、 復帰タイミング過渡期も含めて安全に)。
-	const spans = queryAllInDocs<HTMLElement>('.anim-ux-ab-status')
+	const spans = queryTimelineDocuments<HTMLElement>('.anim-ux-ab-status')
 	if (!spans.length) return
 	const text =
 		loopStart === undefined && loopEnd === undefined
@@ -161,7 +160,7 @@ function ensureMarkerStyle(): void {
 // popout 中は TIMELINE 諸共 inner が子窓に居るので popoutBus 経由で検索 (= getElementById hook で
 // メイン経路の document.getElementById も子窓 fallback されるが、 明示経路の方が意図が読める)。
 function ensureMarkers(): void {
-	const inner = findElementByIdInDocs('timeline_body_inner')
+	const inner = findTimelineElementById('timeline_body_inner')
 	if (!inner) return
 	if (!markerA || markerA.parentElement !== inner) {
 		if (markerA?.parentElement) markerA.remove()
@@ -233,6 +232,7 @@ function syncMarkerWatch(): void {
 let actions: Array<{ delete(): void }> = []
 
 export function installAbLoop(): () => void {
+	const unregisterToggleEffect = registerToggleEffect('abLoop', () => syncAbLoopWatch())
 	// keybind は BB 標準スタイルの **文字列指定** (= 内部で `key.toUpperCase().charCodeAt(0)` 変換)。
 	// 初版は numeric keyCode (= 65 等) を渡してたが、 v0.1 の arrow key (= 37/39) と挙動が
 	// 違って alphabet では fire しないケースがあったため、 BB 例 (= bbmodel.js:872 等) に揃えて string に。
@@ -313,6 +313,7 @@ export function installAbLoop(): () => void {
 	// toggle / shortcut で ON にされた時点で syncAbLoopWatch() / syncMarkerWatch() が走って start する。
 
 	return () => {
+		unregisterToggleEffect()
 		unregisterRefresh()
 		for (const a of actions) {
 			try {

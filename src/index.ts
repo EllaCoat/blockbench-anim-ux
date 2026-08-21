@@ -3,43 +3,43 @@
 // 大型モデル (= ボーン 100+ 等) でのアニメーション作成効率化を目的とする。
 
 import { installAbLoop } from './abLoop'
-import { installAnimatorPanelUI } from './animatorPanelUI'
+import { installAnimatorPanel } from './animatorPanel'
 import { installBreadcrumbs } from './breadcrumb'
 import { installKeyframeJump } from './keyframeJump'
 import { installOnionSkin } from './onionSkin'
-import { addDocumentListener, getActivePopoutDocument } from './popoutBus'
-import { installSearchHandler } from './search'
-import { installTimelinePopout } from './timelinePopout'
-import { installTogglesHandler } from './toggles'
+import { installTimelineWindow, timelineWindowService } from './timelineWindow'
 
 declare const Plugin: { register(id: string, opts: Record<string, unknown>): void }
+declare const Blockbench:
+	| { dispatchEvent(event: string, data: unknown): void }
+	| undefined
 
 const PLUGIN_ID = 'anim_ux'
 const PLUGIN_VERSION = '0.6.0'
 
 let cleanups: Array<() => void> = []
 
-// AJ 本体 / 他 plugin が popout 子窓を意識せずに listener / mount 先を取れるよう、
-// 安定 API として window.AnimUX を公開する。 anim_ux 未 install でも害なく optional 依存できる形にする。
-// API は popoutBus 上の機能を薄くラップするだけ (= 既存実装の再公開)。
+// Companion plugin が load 順序に依存せず親/子 document の現在値を購読できるよう、
+// discovery point と ready event だけを global に公開する。窓の状態は timelineWindowService が所有する。
+interface AnimUxTimelineExternalAPI {
+	subscribeDocuments(listener: (documents: readonly Document[]) => void): () => void
+}
+
 interface AnimUxExternalAPI {
 	version: string
-	addDocumentListener(
-		type: string,
-		fn: EventListenerOrEventListenerObject,
-		opts?: boolean | AddEventListenerOptions,
-	): () => void
-	getActivePopoutDocument(): Document | null
+	timeline: AnimUxTimelineExternalAPI
 }
 
 function installExternalAPI(): () => void {
 	const holder = window as unknown as { AnimUX?: AnimUxExternalAPI }
 	const api: AnimUxExternalAPI = {
 		version: PLUGIN_VERSION,
-		addDocumentListener,
-		getActivePopoutDocument,
+		timeline: {
+			subscribeDocuments: listener => timelineWindowService.subscribeDocuments(listener),
+		},
 	}
 	holder.AnimUX = api
+	Blockbench?.dispatchEvent('animux:ready', { api })
 	return (): void => {
 		if (holder.AnimUX === api) {
 			try {
@@ -60,18 +60,25 @@ Plugin.register(PLUGIN_ID, {
 	variant: 'desktop',
 	version: PLUGIN_VERSION,
 	onload() {
-		cleanups.push(installExternalAPI())
-		cleanups.push(installAnimatorPanelUI())
-		cleanups.push(installSearchHandler())
-		cleanups.push(installTogglesHandler())
-		cleanups.push(installBreadcrumbs())
-		cleanups.push(installKeyframeJump())
-		cleanups.push(installAbLoop())
-		cleanups.push(installOnionSkin())
-		cleanups.push(installTimelinePopout())
+		const installed: Array<() => void> = []
+		try {
+			installed.push(installExternalAPI())
+			installed.push(installAnimatorPanel())
+			installed.push(installBreadcrumbs())
+			installed.push(installKeyframeJump())
+			installed.push(installAbLoop())
+			installed.push(installOnionSkin())
+			installed.push(installTimelineWindow())
+			cleanups = installed
+		} catch (error) {
+			for (const cleanup of installed.reverse()) {
+				try { cleanup() } catch { /* preserve the installation error */ }
+			}
+			throw error
+		}
 	},
 	onunload() {
-		for (const fn of cleanups) {
+		for (const fn of cleanups.reverse()) {
 			try {
 				fn()
 			} catch (e) {
