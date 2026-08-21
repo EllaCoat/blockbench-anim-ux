@@ -4,6 +4,7 @@
   "private": false,
   "description": "Blockbench plugin: detachable Timeline, animator workflow tools, and explicit-texel cube UV layout.",
   "type": "module",
+  "packageManager": "pnpm@10.34.5",
   "scripts": {
     "build": "node build.mjs",
     "dev": "node build.mjs --dev",

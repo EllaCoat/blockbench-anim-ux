@@ -82,6 +82,10 @@ stays on the primary window.
 
 ## Build
 
+The repository pins pnpm and rejects newly published dependency versions for seven days.
+Dependency install scripts are denied unless explicitly listed in `pnpm-workspace.yaml`;
+currently only `esbuild` is allowed.
+
 ```bash
 pnpm install
 pnpm build       # production build (minified)
