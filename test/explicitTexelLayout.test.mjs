@@ -16,75 +16,78 @@ const texture = (pixelWidth = 32, pixelHeight = 32, uvWidth = pixelWidth, uvHeig
 
 const dimensions = (x, y, z) => ({ x, y, z })
 
-test('places a 5 texel cube independently of 5.5 geometry units', () => {
+test('places an active face independently of geometry units', () => {
 	const plan = planExplicitTexelLayout({
 		// The extra geometry value documents the contract: it is intentionally not
 		// used when the physical texel dimensions are explicit.
 		geometry: [5.5, 5.5, 5.5],
 		dimensions: dimensions(5, 5, 5),
 		texture: texture(32, 32),
+		activeFaces: ['north'],
 	})
 
 	assert.deepEqual(plan.origin, { x: 0, y: 0 })
-	assert.deepEqual(plan.bounds, { width: 20, height: 10 })
-	assert.deepEqual(plan.faces.up.uv, [10, 5, 5, 0])
-	assert.deepEqual(plan.faces.down.uv, [15, 0, 10, 5])
+	assert.deepEqual(plan.bounds, { width: 5, height: 5 })
+	assert.deepEqual(plan.faces.north.uv, [0, 0, 5, 5])
 })
 
-test('places a 2 texel cube independently of 3.7 geometry units', () => {
-	const plan = planExplicitTexelLayout({
-		geometry: [3.7, 3.7, 3.7],
-		dimensions: dimensions(2, 2, 2),
-		texture: texture(16, 16),
-	})
-
-	assert.deepEqual(plan.bounds, { width: 8, height: 4 })
-	assert.deepEqual(plan.faces.north.uv, [2, 2, 4, 4])
-})
-
-test('uses the Blockbench six-face net and preserves up/down flips', () => {
+test('orders active faces by physical area and packs each face independently', () => {
 	const plan = planExplicitTexelLayout({
 		dimensions: dimensions(2, 3, 4),
 		texture: texture(32, 32),
 	})
 
-	assert.deepEqual(plan.faces.east.uv, [0, 4, 4, 7])
-	assert.deepEqual(plan.faces.north.uv, [4, 4, 6, 7])
-	assert.deepEqual(plan.faces.west.uv, [6, 4, 10, 7])
-	assert.deepEqual(plan.faces.south.uv, [10, 4, 12, 7])
+	assert.deepEqual(Object.keys(plan.faces), ['east', 'west', 'up', 'down', 'north', 'south'])
+	assert.deepEqual(plan.faces.east.uv, [0, 0, 4, 3])
+	assert.deepEqual(plan.faces.west.uv, [0, 3, 4, 6])
 	assert.deepEqual(plan.faces.up.uv, [6, 4, 4, 0])
-	assert.deepEqual(plan.faces.down.uv, [8, 0, 6, 4])
+	assert.deepEqual(plan.faces.down.uv, [6, 4, 4, 8])
+	assert.deepEqual(plan.faces.north.uv, [0, 6, 2, 9])
+	assert.deepEqual(plan.faces.south.uv, [6, 0, 8, 3])
+})
+
+test('preserves the existing up/down UV orientation', () => {
+	const plan = planExplicitTexelLayout({
+		dimensions: dimensions(2, 3, 4),
+		texture: texture(8, 12),
+		activeFaces: ['up', 'down'],
+	})
+
+	assert.deepEqual(plan.faces.up.uv, [2, 4, 0, 0])
+	assert.deepEqual(plan.faces.down.uv, [4, 0, 2, 4])
 })
 
 test('converts physical pixels to non-1:1 Blockbench UV units', () => {
 	const plan = planExplicitTexelLayout({
 		dimensions: dimensions(2, 1, 3),
 		texture: texture(32, 16, 16, 8),
+		activeFaces: ['east'],
 	})
 
-	assert.deepEqual(plan.faces.east.uv, [0, 1.5, 1.5, 2])
-	assert.deepEqual(plan.faces.north.uv, [1.5, 1.5, 2.5, 2])
-	assert.deepEqual(plan.faces.up.uv, [2.5, 1.5, 1.5, 0])
+	assert.deepEqual(plan.faces.east.uv, [0, 0, 1.5, 0.5])
 })
 
 test('avoids occupied rectangles from existing faces in physical pixel space', () => {
 	const plan = planExplicitTexelLayout({
 		dimensions: dimensions(1, 1, 1),
 		texture: texture(8, 4),
-		occupied: [{ uv: [0, 1, 1, 2] }],
+		occupied: [{ uv: [0, 0, 1, 1] }],
+		activeFaces: ['east'],
 	})
 
 	assert.deepEqual(plan.origin, { x: 0, y: 1 })
 })
 
-test('uses Blockbench diagonal first-fit order', () => {
+test('uses diagonal first-fit order and updates occupancy after each face', () => {
 	const plan = planExplicitTexelLayout({
 		dimensions: dimensions(1, 1, 1),
-		texture: texture(8, 4),
+		texture: texture(3, 1),
 		occupied: [{ uv: [1, 0, 2, 1] }],
+		activeFaces: ['east', 'north'],
 	})
 
-	assert.deepEqual(plan.origin, { x: 0, y: 1 })
+	assert.deepEqual(plan.faces.east.uv, [0, 0, 1, 1])
+	assert.deepEqual(plan.faces.north.uv, [2, 0, 3, 1])
 })
 
 test('handles reversed occupied UV rectangles and keeps the candidate in bounds', () => {
@@ -92,9 +95,10 @@ test('handles reversed occupied UV rectangles and keeps the candidate in bounds'
 		dimensions: dimensions(1, 1, 1),
 		texture: texture(8, 4),
 		occupied: [{ uv: [1, 2, 0, 1] }],
+		activeFaces: ['east'],
 	})
 
-	assert.deepEqual(plan.origin, { x: 0, y: 1 })
+	assert.deepEqual(plan.origin, { x: 0, y: 0 })
 	for (const face of Object.values(plan.faces)) {
 		for (const value of face.uv) assert.ok(value >= 0 && value <= 8)
 	}
@@ -103,24 +107,30 @@ test('handles reversed occupied UV rectangles and keeps the candidate in bounds'
 test('fits exactly at the texture boundary', () => {
 	const plan = planExplicitTexelLayout({
 		dimensions: dimensions(1, 1, 1),
-		texture: texture(4, 2),
+		texture: texture(1, 1),
+		activeFaces: ['east'],
 	})
 
 	assert.deepEqual(plan.origin, { x: 0, y: 0 })
-	assert.deepEqual(plan.faces.south.uv, [3, 1, 4, 2])
+	assert.deepEqual(plan.faces.east.uv, [0, 0, 1, 1])
 })
 
 test('reports no space without returning a partial plan', () => {
 	assert.throws(
-		() => planExplicitTexelLayout({ dimensions: dimensions(1, 1, 1), texture: texture(3, 2) }),
+		() => planExplicitTexelLayout({
+			dimensions: dimensions(2, 1, 1),
+			texture: texture(1, 1),
+			activeFaces: ['north'],
+		}),
 		(error) => error instanceof ExplicitTexelLayoutError && error.code === 'no-space' && error.noChange,
 	)
 
 	assert.throws(
 		() => planExplicitTexelLayout({
 			dimensions: dimensions(1, 1, 1),
-			texture: texture(4, 2),
-			occupied: [{ uv: [0, 0, 4, 2] }],
+			texture: texture(1, 1),
+			occupied: [{ uv: [0, 0, 1, 1] }],
+			activeFaces: ['east'],
 		}),
 		(error) => error instanceof ExplicitTexelLayoutError && error.code === 'no-space' && error.noChange,
 	)
@@ -244,10 +254,89 @@ test('applies six faces as one Undo while preserving geometry and non-UV face pr
 	}
 })
 
+test('assigns only existing enabled faces and includes an unassigned false-texture face', () => {
+	const target = cube()
+	target.faces.north.texture = null
+	target.faces.north.uv = [20, 21, 22, 23]
+	target.faces.north.rotation = 90
+	target.faces.up.texture = null
+	target.faces.up.uv = [20, 21, 22, 23]
+	target.faces.up.rotation = 90
+	target.faces.west.texture = 'old-texture'
+	target.faces.west.enabled = false
+	target.faces.west.uv = [20, 21, 22, 23]
+	target.faces.west.rotation = 90
+	const untouched = {
+		north: structuredClone(target.faces.north),
+		up: structuredClone(target.faces.up),
+		west: structuredClone(target.faces.west),
+	}
+	target.faces.east.texture = false
+	const { host, calls } = hostFor(target)
+
+	applyExplicitTexelLayout({
+		textureId: 'chosen-texture',
+		dimensions: dimensions(2, 3, 1),
+	}, host)
+
+	assert.deepEqual(calls, ['begin', 'finish', 'refresh'])
+	assert.deepEqual(target.faces.north, untouched.north)
+	assert.deepEqual(target.faces.up, untouched.up)
+	assert.deepEqual(target.faces.west, untouched.west)
+	for (const face of ['east', 'down', 'south']) {
+		assert.equal(target.faces[face].texture, 'chosen-texture')
+		assert.equal(target.faces[face].rotation, 0)
+	}
+})
+
+test('excludes deleted and disabled faces from other-cube occupation', () => {
+	const target = cube()
+	for (const face of ['north', 'west', 'up', 'down', 'south']) target.faces[face].texture = null
+	target.faces.east.texture = false
+
+	const blocker = cube('blocker')
+	for (const face of Object.keys(blocker.faces)) blocker.faces[face].texture = null
+	blocker.faces.east.texture = 'chosen-texture'
+	blocker.faces.east.uv = [0, 0, 1, 1]
+	blocker.faces.north.texture = null
+	blocker.faces.north.uv = [1, 0, 2, 1]
+	blocker.faces.west.texture = 'chosen-texture'
+	blocker.faces.west.enabled = false
+	blocker.faces.west.uv = [1, 0, 2, 1]
+	const { host } = hostFor(target, {
+		allCubes: [target, blocker],
+		layout: texture(2, 1),
+	})
+
+	applyExplicitTexelLayout({
+		textureId: 'chosen-texture',
+		dimensions: dimensions(1, 1, 1),
+	}, host)
+
+	assert.deepEqual(target.faces.east.uv, [1, 0, 2, 1])
+})
+
+test('rejects a cube with no existing enabled faces before opening Undo', () => {
+	const target = cube()
+	for (const face of Object.values(target.faces)) {
+		face.texture = null
+		face.enabled = true
+	}
+	const before = structuredClone(target)
+	const { host, calls } = hostFor(target)
+
+	assert.throws(
+		() => applyExplicitTexelLayout({ textureId: 'chosen-texture', dimensions: dimensions(1, 1, 1) }, host),
+		(error) => error?.code === 'invalid-input' && error?.noChange === true,
+	)
+	assert.deepEqual(calls, [])
+	assert.deepEqual(target, before)
+})
+
 test('preflight failure opens no Undo entry and leaves the cube unchanged', () => {
 	const target = cube()
 	const before = structuredClone(target)
-	const { host, calls } = hostFor(target, { layout: texture(3, 2) })
+	const { host, calls } = hostFor(target, { layout: texture(2, 2) })
 
 	assert.throws(
 		() => applyExplicitTexelLayout({ textureId: 'chosen-texture', dimensions: dimensions(1, 1, 1) }, host),
@@ -261,7 +350,7 @@ test('rejects a texture used by a non-cube element before opening Undo', () => {
 	const target = cube()
 	const before = structuredClone(target)
 	const { host, calls } = hostFor(target, {
-		nonCubeFaces: [{ texture: 'chosen-texture' }],
+		nonCubeFaces: [{ texture: false, getTexture: () => 'chosen-texture' }],
 	})
 
 	assert.throws(
@@ -270,6 +359,29 @@ test('rejects a texture used by a non-cube element before opening Undo', () => {
 	)
 	assert.deepEqual(calls, [])
 	assert.deepEqual(target, before)
+})
+
+test('counts a raw-false getter-resolved face on another cube as occupied', () => {
+	const target = cube()
+	for (const face of ['north', 'west', 'up', 'down', 'south']) target.faces[face].texture = null
+	target.faces.east.texture = false
+
+	const blocker = cube('blocker')
+	for (const face of Object.keys(blocker.faces)) blocker.faces[face].texture = null
+	blocker.faces.east.texture = false
+	blocker.faces.east.getTexture = () => 'chosen-texture'
+	blocker.faces.east.uv = [0, 0, 1, 1]
+	const { host } = hostFor(target, {
+		allCubes: [target, blocker],
+		layout: texture(2, 1),
+	})
+
+	applyExplicitTexelLayout({
+		textureId: 'chosen-texture',
+		dimensions: dimensions(1, 1, 1),
+	}, host)
+
+	assert.deepEqual(target.faces.east.uv, [1, 0, 2, 1])
 })
 
 test('rejects formats that override per-face texture assignment before opening Undo', () => {

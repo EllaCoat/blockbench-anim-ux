@@ -11,6 +11,7 @@ import {
 interface TextureBearingFace {
 	texture?: unknown
 	getTexture?: () => unknown
+	enabled?: boolean
 }
 
 interface BlockbenchFace extends TextureBearingFace {
@@ -216,13 +217,35 @@ function faceFor(cube: BlockbenchCube, face: ExplicitTexelFace): BlockbenchFace 
 	return value
 }
 
+function faceTextureValue(face: TextureBearingFace): unknown {
+	if (typeof face.getTexture === 'function') return face.getTexture()
+	return face.texture
+}
+
+function isActiveFace(face: TextureBearingFace | undefined): face is BlockbenchFace {
+	return Boolean(face) && face.texture !== null && face.enabled !== false
+}
+
+function activeFaces(cube: BlockbenchCube): ExplicitTexelFace[] {
+	const result: ExplicitTexelFace[] = []
+	for (const face of EXPLICIT_TEXEL_FACES) {
+		const value = cube.faces?.[face]
+		if (!isActiveFace(value)) continue
+		faceFor(cube, face)
+		result.push(face)
+	}
+	if (result.length === 0) noChange('The selected cube has no available faces for explicit texel UV layout.')
+	return result
+}
+
 function faceUsesTexture(
 	host: ExplicitTexelLayoutHost,
 	face: TextureBearingFace,
 	texture: BlockbenchTexture,
 	textureId: string,
 ): boolean {
-	const value = typeof face.getTexture === 'function' ? face.getTexture() : face.texture
+	if (!isActiveFace(face)) return false
+	const value = faceTextureValue(face)
 	if (value === null || value === false || value === undefined) return false
 	if (value === texture) return true
 	const valueId = typeof value === 'string' ? value : host.textureId(value)
@@ -230,7 +253,7 @@ function faceUsesTexture(
 }
 
 /**
- * Preflight and apply one complete six-face layout. All validation and
+ * Preflight and apply one complete active-face layout. All validation and
  * packing happen before `beginUndo`; the mutation section is one undo entry.
  */
 export function applyExplicitTexelLayout(
@@ -252,6 +275,7 @@ export function applyExplicitTexelLayout(
 	if (!host.supportsFaceTextureAssignment()) {
 		noChange('Explicit texel UV layout requires a format with per-face texture assignment.')
 	}
+	const targetFaces = activeFaces(cube)
 	if (host.nonCubeFaces().some((face) => faceUsesTexture(host, face, texture, textureId))) {
 		noChange('The selected texture is used by a non-cube element; its UV occupation cannot be changed safely.')
 	}
@@ -260,10 +284,11 @@ export function applyExplicitTexelLayout(
 	for (const otherCube of host.allCubes()) {
 		if (otherCube === cube) continue
 		for (const face of EXPLICIT_TEXEL_FACES) {
+			const value = otherCube.faces?.[face]
+			if (!isActiveFace(value)) continue
+			if (!faceUsesTexture(host, value, texture, textureId)) continue
 			const otherFace = faceFor(otherCube, face)
-			if (faceUsesTexture(host, otherFace, texture, textureId)) {
-				occupied.push({ uv: [...otherFace.uv] as [number, number, number, number] })
-			}
+			occupied.push({ uv: [...otherFace.uv] as [number, number, number, number] })
 		}
 	}
 
@@ -271,6 +296,7 @@ export function applyExplicitTexelLayout(
 		dimensions: request.dimensions,
 		texture: host.textureLayout(texture),
 		occupied,
+		activeFaces: targetFaces,
 	})
 
 	let undoOpen = false
@@ -279,7 +305,7 @@ export function applyExplicitTexelLayout(
 		undoOpen = true
 		cube.box_uv = false
 		cube.autouv = 0
-		for (const face of EXPLICIT_TEXEL_FACES) {
+		for (const face of targetFaces) {
 			const targetFace = faceFor(cube, face)
 			targetFace.texture = textureId
 			targetFace.uv = [...plan.faces[face].uv] as [number, number, number, number]
@@ -353,7 +379,9 @@ export function openExplicitTexelLayoutDialog(): void {
 					textureId: result.texture,
 					dimensions: { x: Number(result.x), y: Number(result.y), z: Number(result.z) },
 				})
-				notify(`Placed six UV faces at texel ${plan.origin.x}, ${plan.origin.y}.`)
+				const count = Object.keys(plan.faces).length
+				const label = count === 1 ? 'UV face' : 'UV faces'
+				notify(`Placed ${count} ${label} in unused texture space.`)
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error)
 				notify(message)
