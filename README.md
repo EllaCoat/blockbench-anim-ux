@@ -7,7 +7,7 @@ and Adobe After Effects (Shy / property-based filtering).
 
 ## Features
 
-### v0.7 — Timeline lifecycle + explicit texel UV layout
+### v0.7.1 — Timeline lifecycle + explicit texel UV layout
 
 - **Single-owner Timeline window lifecycle** — pop-out state, document listeners,
   Blockbench compatibility bridges, restoration, and cleanup now share one lifecycle.
@@ -15,8 +15,10 @@ and Adobe After Effects (Shy / property-based filtering).
   immediately reports the parent / pop-out document set and follows later transitions.
   Plugins loaded before anim_ux can listen for Blockbench's `animux:ready` event.
 - **Explicit Texel UV Layout** — choose one cube, one existing texture, and integer
-  `{x, y, z}` texel dimensions. The action places a standard six-face cube net in
-  unused texture space without changing geometry or bitmap content, in one Undo entry.
+  `{x, y, z}` texel dimensions. The action places only the cube's existing, enabled
+  faces as independent physical rectangles in unused texture space. Deleted or
+  disabled faces are left untouched, including their UVs and rotations. Geometry,
+  bitmap content, and texture resolution remain unchanged in one Undo entry.
 
 ### v0.1 — Animator panel UX
 

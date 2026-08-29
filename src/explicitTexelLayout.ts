@@ -1,9 +1,9 @@
 /**
- * Plan B: place one cube's six face UVs for an explicit physical texel size.
+ * Place the selected cube faces for an explicit physical texel size.
  *
- * The layout coordinates intentionally follow Blockbench's face-template net
- * (see `TextureGenerator.boxUVCubeTemplate`), while the requested dimensions
- * are physical texture cells rather than geometry units.
+ * Face orientation follows Blockbench's face-template net (see
+ * `TextureGenerator.boxUVCubeTemplate`), while each face is packed as an
+ * independent physical texture rectangle.
  */
 
 export const EXPLICIT_TEXEL_FACES = [
@@ -55,7 +55,7 @@ export interface ExplicitTexelLayoutPlan {
 	origin: { x: number; y: number }
 	bounds: { width: number; height: number }
 	dimensions: TexelDimensions
-	faces: Record<ExplicitTexelFace, PlannedUVFace>
+	faces: Partial<Record<ExplicitTexelFace, PlannedUVFace>>
 }
 
 export type ExplicitTexelLayoutErrorCode = 'invalid-input' | 'no-space'
@@ -122,14 +122,45 @@ function validateOccupied(occupied: readonly OccupiedUVRect[]): void {
 
 function faceRects(dimensions: TexelDimensions): Record<ExplicitTexelFace, PhysicalFaceRect> {
 	const { x, y, z } = dimensions
+	const make = (face: ExplicitTexelFace, width: number, height: number): PhysicalFaceRect => ({
+		face,
+		x: width < 0 ? -width : 0,
+		y: height < 0 ? -height : 0,
+		width,
+		height,
+	})
 	return {
-		east: { face: 'east', x: 0, y: z, width: z, height: y },
-		north: { face: 'north', x: z, y: z, width: x, height: y },
-		west: { face: 'west', x: z + x, y: z, width: z, height: y },
-		up: { face: 'up', x: z + x, y: z, width: -x, height: -z },
-		down: { face: 'down', x: z + x * 2, y: 0, width: -x, height: z },
-		south: { face: 'south', x: z * 2 + x, y: z, width: x, height: y },
+		east: make('east', z, y),
+		north: make('north', x, y),
+		west: make('west', z, y),
+		up: make('up', -x, -z),
+		down: make('down', -x, z),
+		south: make('south', x, y),
 	}
+}
+
+function isExplicitTexelFace(value: unknown): value is ExplicitTexelFace {
+	return typeof value === 'string' && (EXPLICIT_TEXEL_FACES as readonly string[]).includes(value)
+}
+
+function activeFaceOrder(
+	activeFaces: readonly ExplicitTexelFace[],
+	faces: Record<ExplicitTexelFace, PhysicalFaceRect>,
+): ExplicitTexelFace[] {
+	const seen = new Set<ExplicitTexelFace>()
+	for (const face of activeFaces) {
+		if (!isExplicitTexelFace(face)) invalid(`Unknown cube face "${String(face)}".`)
+		if (seen.has(face)) invalid(`Cube face "${face}" was specified more than once.`)
+		seen.add(face)
+	}
+	if (activeFaces.length === 0) invalid('At least one cube face must be available for layout.')
+
+	return [...activeFaces].sort(
+		(left, right) =>
+			Math.abs(faces[right].width * faces[right].height) -
+				Math.abs(faces[left].width * faces[left].height) ||
+			EXPLICIT_TEXEL_FACES.indexOf(left) - EXPLICIT_TEXEL_FACES.indexOf(right),
+	)
 }
 
 function markUVRect(
@@ -157,7 +188,7 @@ function markUVRect(
 	}
 }
 
-function markPhysicalRect(
+function physicalRectFits(
 	occupiedCells: Uint8Array,
 	texture: LayoutTexture,
 	face: PhysicalFaceRect,
@@ -168,6 +199,7 @@ function markPhysicalRect(
 	const right = originX + Math.max(face.x, face.x + face.width)
 	const top = originY + Math.min(face.y, face.y + face.height)
 	const bottom = originY + Math.max(face.y, face.y + face.height)
+	if (left < 0 || top < 0 || right > texture.pixelWidth || bottom > texture.pixelHeight) return false
 	for (let pixelY = top; pixelY < bottom; pixelY += 1) {
 		const row = pixelY * texture.pixelWidth
 		for (let pixelX = left; pixelX < right; pixelX += 1) {
@@ -175,6 +207,25 @@ function markPhysicalRect(
 		}
 	}
 	return true
+}
+
+function occupyPhysicalRect(
+	occupiedCells: Uint8Array,
+	texture: LayoutTexture,
+	face: PhysicalFaceRect,
+	originX: number,
+	originY: number,
+): void {
+	const left = originX + Math.min(face.x, face.x + face.width)
+	const right = originX + Math.max(face.x, face.x + face.width)
+	const top = originY + Math.min(face.y, face.y + face.height)
+	const bottom = originY + Math.max(face.y, face.y + face.height)
+	for (let pixelY = top; pixelY < bottom; pixelY += 1) {
+		const row = pixelY * texture.pixelWidth
+		for (let pixelX = left; pixelX < right; pixelX += 1) {
+			occupiedCells[row + pixelX] = 1
+		}
+	}
 }
 
 function makeUVRect(
@@ -185,28 +236,69 @@ function makeUVRect(
 ): PlannedUVFace {
 	const uvPerPixelX = texture.uvWidth / texture.pixelWidth
 	const uvPerPixelY = texture.uvHeight / texture.pixelHeight
-	const left = originX + face.x
-	const top = originY + face.y
+	const x = originX + face.x
+	const y = originY + face.y
 	return {
 		...face,
+		x,
+		y,
 		uv: [
-			left * uvPerPixelX,
-			top * uvPerPixelY,
-			(left + face.width) * uvPerPixelX,
-			(top + face.height) * uvPerPixelY,
+			x * uvPerPixelX,
+			y * uvPerPixelY,
+			(x + face.width) * uvPerPixelX,
+			(y + face.height) * uvPerPixelY,
 		],
 	}
 }
 
+function firstDiagonalFit(
+	face: PhysicalFaceRect,
+	occupiedCells: Uint8Array,
+	texture: LayoutTexture,
+): { x: number; y: number } | undefined {
+	const width = Math.abs(face.width)
+	const height = Math.abs(face.height)
+	const maxOriginX = texture.pixelWidth - width
+	const maxOriginY = texture.pixelHeight - height
+	if (maxOriginX < 0 || maxOriginY < 0) return undefined
+
+	// ponytail: fixed-texture diagonal scan; use an indexed packer only after measured UI latency on large textures.
+	for (let line = 0; line <= Math.max(maxOriginX, maxOriginY); line += 1) {
+		for (let space = 0; space <= line; space += 1) {
+			if (space <= maxOriginX && line <= maxOriginY && physicalRectFits(
+				occupiedCells,
+				texture,
+				face,
+				space,
+				line,
+			)) {
+				return { x: space, y: line }
+			}
+			if (space === line) continue
+			if (line <= maxOriginX && space <= maxOriginY && physicalRectFits(
+				occupiedCells,
+				texture,
+				face,
+				line,
+				space,
+			)) {
+				return { x: line, y: space }
+			}
+		}
+	}
+	return undefined
+}
+
 /**
- * Build a complete, deterministic six-face plan without mutating Blockbench.
- * The scan follows Blockbench's diagonal first-fit order to make repeated runs
- * stable for the same texture and occupied-face input.
+ * Build a deterministic face plan without mutating Blockbench. The scan follows
+ * Blockbench's diagonal first-fit order and marks every placed face before the
+ * next face is considered.
  */
 export function planExplicitTexelLayout(input: {
 	dimensions: TexelDimensions
 	texture: LayoutTexture
 	occupied?: readonly OccupiedUVRect[]
+	activeFaces?: readonly ExplicitTexelFace[]
 }): ExplicitTexelLayoutPlan {
 	if (!input || typeof input !== 'object') invalid('A layout request is required.')
 	validateDimensions(input.dimensions)
@@ -215,53 +307,36 @@ export function planExplicitTexelLayout(input: {
 	validateOccupied(occupied)
 
 	const faces = faceRects(input.dimensions)
-	const bounds = {
-		width: 2 * (input.dimensions.x + input.dimensions.z),
-		height: input.dimensions.y + input.dimensions.z,
-	}
-	if (bounds.width > input.texture.pixelWidth || bounds.height > input.texture.pixelHeight) {
-		throw new ExplicitTexelLayoutError(
-			'no-space',
-			`The ${bounds.width}x${bounds.height} cube net does not fit in the ${input.texture.pixelWidth}x${input.texture.pixelHeight} texture.`,
-		)
-	}
+	const requestedFaces = input.activeFaces ?? EXPLICIT_TEXEL_FACES
+	if (!Array.isArray(requestedFaces)) invalid('Active cube faces must be an array.')
+	const orderedFaces = activeFaceOrder(requestedFaces, faces)
 
 	const occupiedCells = new Uint8Array(input.texture.pixelWidth * input.texture.pixelHeight)
 	for (const entry of occupied) markUVRect(occupiedCells, input.texture, entry.uv)
 
-	const maxOriginX = input.texture.pixelWidth - bounds.width
-	const maxOriginY = input.texture.pixelHeight - bounds.height
-	// ponytail: fixed-texture diagonal scan; use an indexed packer only after measured UI latency on large textures.
-	const tryOrigin = (originX: number, originY: number): ExplicitTexelLayoutPlan | undefined => {
-		if (originX > maxOriginX || originY > maxOriginY) return undefined
-			const fits = EXPLICIT_TEXEL_FACES.every((face) =>
-				markPhysicalRect(occupiedCells, input.texture, faces[face], originX, originY),
+	const plannedFaces: Partial<Record<ExplicitTexelFace, PlannedUVFace>> = {}
+	for (const face of orderedFaces) {
+		const physicalFace = faces[face]
+		const placement = firstDiagonalFit(physicalFace, occupiedCells, input.texture)
+		if (!placement) {
+			throw new ExplicitTexelLayoutError(
+				'no-space',
+				`No free ${Math.abs(physicalFace.width)}x${Math.abs(physicalFace.height)} space is available for the ${face} face.`,
 			)
-			if (!fits) return undefined
-
-			const plannedFaces = {} as Record<ExplicitTexelFace, PlannedUVFace>
-			for (const face of EXPLICIT_TEXEL_FACES) {
-				plannedFaces[face] = makeUVRect(faces[face], originX, originY, input.texture)
-			}
-			return {
-				origin: { x: originX, y: originY },
-				bounds,
-				dimensions: { ...input.dimensions },
-				faces: plannedFaces,
-			}
-	}
-	for (let line = 0; line <= Math.max(maxOriginX, maxOriginY); line += 1) {
-		for (let space = 0; space <= line; space += 1) {
-			const vertical = tryOrigin(space, line)
-			if (vertical) return vertical
-			if (space === line) continue
-			const horizontal = tryOrigin(line, space)
-			if (horizontal) return horizontal
 		}
+		plannedFaces[face] = makeUVRect(physicalFace, placement.x, placement.y, input.texture)
+		occupyPhysicalRect(occupiedCells, input.texture, physicalFace, placement.x, placement.y)
 	}
 
-	throw new ExplicitTexelLayoutError(
-		'no-space',
-		`No free ${bounds.width}x${bounds.height} cube net is available in the selected texture.`,
-	)
+	const placedFaces = Object.values(plannedFaces) as PlannedUVFace[]
+	const left = Math.min(...placedFaces.map((face) => Math.min(face.x, face.x + face.width)))
+	const right = Math.max(...placedFaces.map((face) => Math.max(face.x, face.x + face.width)))
+	const top = Math.min(...placedFaces.map((face) => Math.min(face.y, face.y + face.height)))
+	const bottom = Math.max(...placedFaces.map((face) => Math.max(face.y, face.y + face.height)))
+	return {
+		origin: { x: left, y: top },
+		bounds: { width: right - left, height: bottom - top },
+		dimensions: { ...input.dimensions },
+		faces: plannedFaces,
+	}
 }
