@@ -7,6 +7,22 @@ and Adobe After Effects (Shy / property-based filtering).
 
 ## Features
 
+### v0.8 — Cube edge midpoint pivots
+
+In **Edit** mode, select a cube and activate the **Pivot tool** (`P`). Small
+points appear at the cube's edge midpoints. Click a point to move the selected
+pivot to it while keeping the cube's shape in place. If a bone is selected,
+the operation moves that bone's pivot, following Blockbench's pivot selection.
+The operation supports Undo/Redo, rotated parent bones, and rescaled cubes.
+
+A flat cube shows its four perimeter midpoints. Inflate and stretch are included
+in the target positions; Blockbench's artificial render thickness for flat
+cubes is excluded. Points disappear when changing tools or unloading anim-ux.
+The native vertex snap tool (`X`) keeps its existing points and behavior.
+If preserving the shape would exceed the format's coordinate limits (for
+example, a Java block cube at the boundary), the operation shows a message and
+leaves every selected pivot unchanged. The existing size-limit setting is honored.
+
 ### v0.7.1 — Timeline lifecycle + explicit texel UV layout
 
 - **Single-owner Timeline window lifecycle** — pop-out state, document listeners,

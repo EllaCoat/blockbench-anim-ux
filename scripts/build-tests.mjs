@@ -1,7 +1,7 @@
 import { build } from 'esbuild'
 
 await build({
-	entryPoints: ['src/explicitTexelLayout.ts', 'src/installExplicitTexelLayout.ts'],
+	entryPoints: ['src/explicitTexelLayout.ts', 'src/installExplicitTexelLayout.ts', 'src/cubeEdgeMidpoints.ts', 'src/installPivotEdgeMidpoints.ts'],
 	bundle: true,
 	format: 'esm',
 	platform: 'node',

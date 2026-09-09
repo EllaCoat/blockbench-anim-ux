@@ -1,6 +1,6 @@
 {
   "name": "blockbench-anim-ux",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": false,
   "description": "Blockbench plugin: detachable Timeline, animator workflow tools, and explicit-texel cube UV layout.",
   "type": "module",
