@@ -96,6 +96,20 @@ pnpm dev         # dev build with inline sourcemap
 
 Output: `dist/anim_ux.js`
 
+## Tests
+
+Run `pnpm test` with Node.js 24 or later. The shared wrapper builds the test
+modules and runs Node's standard test runner. To select files, use
+`pnpm test test/explicitTexelLayout.test.mjs`.
+
+Successful runs print the selected scope, aggregate counts, and exit result.
+Failures include assertion or loading diagnostics; lengthy output is bounded
+and the complete log path is printed. Build errors prevent the tests from
+starting. Empty runs, test timeouts, and abnormal exits fail the command.
+The build and test processes have 60-second and 120-second limits, respectively;
+individual tests have a 30-second default timeout. Logs remain in the OS
+temporary directory for inspection.
+
 ## Compatibility
 
 - Designed for general Blockbench projects. No project-format gate, so it activates on any
