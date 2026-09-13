@@ -7,6 +7,20 @@ and Adobe After Effects (Shy / property-based filtering).
 
 ## Features
 
+### Cube face directions
+
+In **Edit** mode, select cubes and use the **Move tool** (`V`). Small, faint
+**N E S W U D** labels appear just beyond their face centers. They follow each
+cube and its parent rotations, regardless of the Move tool's coordinate space.
+For ordinary positive-size cubes, North is local −Z, East +X, South +Z, West −X,
+Up +Y, and Down −Y. Inverted bounds retain Blockbench's actual face names.
+
+Labels keep their screen size when zooming, work in perspective and orthographic
+views (including split views), and do not intercept mouse input. When looking
+straight down an axis, its two letters sit side by side. Hidden or locked cubes
+are excluded. Changing tools/modes, clearing selection, or unloading anim-ux
+removes the labels. Model data, UVs, and Undo history are not modified.
+
 ### v0.8 — Cube edge midpoint pivots
 
 In **Edit** mode, select a cube and activate the **Pivot tool** (`P`). Small
