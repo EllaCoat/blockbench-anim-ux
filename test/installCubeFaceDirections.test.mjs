@@ -92,15 +92,15 @@ test('labels reuse nodes and follow the current mesh transform, camera, and view
 	assert.notEqual(list[0].style.left, list[2].style.left, 'axis-aligned labels must not coincide')
 })
 
-test('each editor viewport and selected cube owns labels, while hidden/locked cubes and media previews are excluded', t => {
+test('each editor viewport owns one label set, while hidden/locked cubes and media previews are excluded', t => {
 	const { preview, selected, labels, Preview } = setup(t)
 	const second = cube()
 	Cube.selected.push(second)
 	const split = new Preview()
 	Preview.all.push(split)
 	preview.render(); split.render()
-	assert.equal(labels().length, 12)
-	assert.equal(split.node.children[0].children.length, 12)
+	assert.equal(labels().length, 6)
+	assert.equal(split.node.children[0].children.length, 6)
 	second.mesh.parent = { visible: false }
 	preview.render()
 	assert.equal(labels().length, 6)
@@ -118,6 +118,64 @@ test('each editor viewport and selected cube owns labels, while hidden/locked cu
 	assert.equal(media.node.children.length, 0)
 	preview.canvas.isConnected = false
 	selected.visibility = true
+	preview.render()
+	assert.equal(labels().length, 0)
+})
+
+test('large multi-selection keeps just the first eligible cube labels and reuses six nodes during movement', t => {
+	const { preview, selected, labels } = setup(t)
+	preview.render()
+	const nodes = labels().slice()
+	const positions = () => labels().map(n => [n.style.left, n.style.top])
+	const before = positions()
+	const rest = Array.from({ length: 1000 }, cube)
+	for (const other of rest) {
+		other.mesh.matrixWorld = () => { throw new Error('Non-reference cube must not be projected') }
+	}
+	Cube.selected.push(...rest)
+	preview.render()
+	assert.equal(labels().length, 6)
+	assert.deepEqual(positions(), before)
+	assert.ok(labels().every((node, index) => node === nodes[index]))
+	selected.mesh.matrixWorld = ({ x, y, z }) => ({ x: x + 1, y: y + 1, z })
+	preview.render()
+	assert.notDeepEqual(positions(), before)
+	assert.ok(labels().every((node, index) => node === nodes[index]))
+})
+
+test('reference follows selection order and skips hidden, locked, missing-geometry and ancestor-hidden cubes', t => {
+	const { preview, selected, labels } = setup(t)
+	const second = cube()
+	second.mesh.matrixWorld = ({ x, y, z }) => ({ x: -x + 1, y, z: -z })
+	const positions = () => labels().map(n => [n.style.left, n.style.top])
+	Cube.selected = [second]
+	preview.render()
+	const expected = positions()
+	Cube.selected = [selected, second]
+	preview.render()
+	assert.notDeepEqual(positions(), expected)
+	Cube.selected = [second, selected]
+	preview.render()
+	assert.deepEqual(positions(), expected)
+	for (const exclude of [
+		c => { c.visibility = false },
+		c => { c.locked = true },
+		c => { c.mesh.visible = false },
+		c => { c.mesh.parent = { visible: true, parent: { visible: false } } },
+		c => { delete c.mesh },
+		c => { delete c.mesh.geometry.boundingBox },
+	]) {
+		const excluded = cube()
+		exclude(excluded)
+		Cube.selected = [excluded, second]
+		preview.render()
+		assert.equal(labels().length, 6)
+		assert.deepEqual(positions(), expected)
+	}
+	Cube.selected = [second]
+	preview.render()
+	assert.deepEqual(positions(), expected)
+	Cube.selected = []
 	preview.render()
 	assert.equal(labels().length, 0)
 })
