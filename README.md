@@ -10,8 +10,13 @@ and Adobe After Effects (Shy / property-based filtering).
 ### Cube face directions
 
 In **Edit** mode, select cubes and use the **Move tool** (`V`). Small, faint
-**N E S W U D** labels appear just beyond their face centers. They follow each
-cube and its parent rotations, regardless of the Move tool's coordinate space.
+**N E S W U D** labels appear just beyond the face centers of the first visible,
+unlocked cube in the selection. Multi-selection keeps **one set of six labels
+per viewport**, rather than adding labels for every cube. The labels follow this
+reference cube and its parent rotations, regardless of the Move tool's coordinate space.
+They identify that cube's actual faces, not shared directions or the selection center.
+Adding more cubes keeps the reference stable; removing or hiding it uses the next
+eligible cube in selection order.
 For ordinary positive-size cubes, North is local −Z, East +X, South +Z, West −X,
 Up +Y, and Down −Y. Inverted bounds retain Blockbench's actual face names.
 

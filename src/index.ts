@@ -18,7 +18,7 @@ declare const Blockbench:
 	| undefined
 
 const PLUGIN_ID = 'anim_ux'
-const PLUGIN_VERSION = '0.9.0'
+const PLUGIN_VERSION = '0.9.1'
 
 let cleanups: Array<() => void> = []
 
