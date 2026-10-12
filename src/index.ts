@@ -7,7 +7,8 @@ import { installAnimatorPanel } from './animatorPanel'
 import { installBreadcrumbs } from './breadcrumb'
 import { installKeyframeJump } from './keyframeJump'
 import { installExplicitTexelLayout } from './installExplicitTexelLayout'
-import { installPivotEdgeMidpoints } from './installPivotEdgeMidpoints'
+import { installPivotSnapPoints } from './installPivotSnapPoints'
+import { installVertexSnapMidpoints } from './installVertexSnapMidpoints'
 import { installCubeFaceDirections } from './installCubeFaceDirections'
 import { installOnionSkin } from './onionSkin'
 import { installTimelineWindow, timelineWindowService } from './timelineWindow'
@@ -18,7 +19,7 @@ declare const Blockbench:
 	| undefined
 
 const PLUGIN_ID = 'anim_ux'
-const PLUGIN_VERSION = '0.9.1'
+const PLUGIN_VERSION = '0.10.0'
 
 let cleanups: Array<() => void> = []
 
@@ -58,7 +59,7 @@ Plugin.register(PLUGIN_ID, {
 	title: 'Animation UX',
 	author: 'EllaCoat',
 	description:
-		'Animator workflow, detachable Timeline, cube face directions, edge midpoint pivots, explicit-texel UV layout, keyframe navigation, A-B loop, and onion skin.',
+		'Animator workflow, detachable Timeline, cube face directions, cube vertex and edge midpoint snapping, explicit-texel UV layout, keyframe navigation, A-B loop, and onion skin.',
 	icon: 'search',
 	variant: 'desktop',
 	version: PLUGIN_VERSION,
@@ -73,7 +74,8 @@ Plugin.register(PLUGIN_ID, {
 			installed.push(installOnionSkin())
 			installed.push(installTimelineWindow())
 			installed.push(installExplicitTexelLayout())
-			installed.push(installPivotEdgeMidpoints())
+			installed.push(installPivotSnapPoints())
+			installed.push(installVertexSnapMidpoints())
 			installed.push(installCubeFaceDirections())
 			cleanups = installed
 		} catch (error) {

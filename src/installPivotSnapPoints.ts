@@ -1,4 +1,4 @@
-import { cubeEdgeMidpoints, type Vertex } from './cubeEdgeMidpoints'
+import { cubeCorners, cubeEdgeMidpoints, cubeSnapBounds, type Vertex } from './cubeSnapPoints'
 
 declare const THREE: any
 declare const Cube: any
@@ -16,11 +16,10 @@ declare const Interface: any
 declare const gizmo_colors: any
 declare const settings: any
 declare function getPivotObjects(): any[] | undefined
-declare function adjustFromAndToForInflateAndStretch(from: number[], to: number[], cube: any): void
 
 type Marker = { cube: any; mesh: any; points: any; previous: any }
 
-export function installPivotEdgeMidpoints(): () => void {
+export function installPivotSnapPoints(): () => void {
 	const tool = BarItems.pivot_tool
 	const originalSelect = tool.onSelect
 	const originalUnselect = tool.onUnselect
@@ -47,12 +46,8 @@ export function installPivotEdgeMidpoints(): () => void {
 
 	function setVertices(marker: Marker) {
 		hovered = ''
-		const from = marker.cube.from.slice()
-		const to = marker.cube.to.slice()
-		adjustFromAndToForInflateAndStretch(from, to, marker.cube)
-		// The renderer adds 0.001 to collapsed axes; snap to the actual Cube plane.
-		const bounds = new Float32Array([...from, ...to].map((v, i) => v - marker.cube.origin[i % 3]))
-		const vertices = cubeEdgeMidpoints(bounds)
+		const bounds = cubeSnapBounds(marker.cube)
+		const vertices = [...cubeCorners(bounds), ...cubeEdgeMidpoints(bounds)]
 		marker.points.vertices = vertices
 		marker.points.geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices.flat(), 3))
 		marker.points.geometry.setAttribute('color', new THREE.Float32BufferAttribute(
@@ -67,7 +62,7 @@ export function installPivotEdgeMidpoints(): () => void {
 			const mesh = cube.mesh
 			if (!mesh?.geometry || cube.visibility === false || cube.locked || !mesh.visible) continue
 			const points = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial().copy(Canvas.meshVertexMaterial))
-			points.name = 'animux_pivot_midpoints'
+			points.name = 'animux_pivot_points'
 			points.no_export = true
 			points.element_uuid = cube.uuid
 			points.renderOrder = 900
@@ -97,12 +92,12 @@ export function installPivotEdgeMidpoints(): () => void {
 		const hit = originalRaycast.apply(this, args)
 		if (active() && hit && markers.get(hit.element)?.points === hit.intersect?.object) {
 			// Preview's ordinary vertex branch edits Mesh vertex selection, not pivots.
-			hit.type = 'animux_pivot_midpoint'
+			hit.type = 'animux_pivot_point'
 		}
 		return hit
 	}
 	function click(this: any, data: any) {
-		if (!active() || data.type !== 'animux_pivot_midpoint') return originalClick?.call(this, data)
+		if (!active() || data.type !== 'animux_pivot_point') return originalClick?.call(this, data)
 		const targets = getPivotObjects() ?? []
 		if (targets.length === 0) return
 		const world = data.element.mesh.localToWorld(new THREE.Vector3().fromArray(data.vertex as Vertex))
@@ -131,7 +126,7 @@ export function installPivotEdgeMidpoints(): () => void {
 		// World-space limits are unchanged because the visible geometry stays fixed.
 		if (limiter && !limiter.rotation_affected && !settings.deactivate_size_limit.value &&
 			[...cubeChanges].some(([cube, change]) => limiter.test(cube, change))) {
-			Blockbench.showQuickMessage('This midpoint exceeds the format coordinate limits; no pivots were moved.', 4000)
+			Blockbench.showQuickMessage('This point exceeds the format coordinate limits; no pivots were moved.', 4000)
 			return
 		}
 		const elements = new Set(Outliner.selected)
@@ -156,20 +151,20 @@ export function installPivotEdgeMidpoints(): () => void {
 			elements: [...elements], element_aspects: { transform: true, geometry: true },
 			groups: [...affectedGroups], group_aspects: { transform: true }, selection: true,
 		})
-		Undo.finishEdit('Move pivot to edge midpoint')
+		Undo.finishEdit('Move pivot to cube point')
 	}
 	function hover(event: MouseEvent) {
 		if (!active() || markers.size === 0) return
 		const hit = Canvas.raycast(event)
-		const isMidpoint = hit?.type === 'animux_pivot_midpoint'
-		const key = `${hit?.element?.uuid ?? ''}:${isMidpoint ? hit.vertex_index : ''}`
+		const isPoint = hit?.type === 'animux_pivot_point'
+		const key = `${hit?.element?.uuid ?? ''}:${isPoint ? hit.vertex_index : ''}`
 		if (key === hovered) return
 		hovered = key
 		for (const { cube, points } of markers.values()) {
 			points.material.depthTest = hit?.element !== cube
 			const colors = points.geometry.attributes.color
 			for (let index = 0; index < points.vertices.length; index++) {
-				const color = isMidpoint && hit.intersect.object === points && hit.vertex_index === index
+				const color = isPoint && hit.intersect.object === points && hit.vertex_index === index
 					? gizmo_colors.outline : gizmo_colors.grid
 				colors.setXYZ(index, color.r, color.g, color.b)
 			}
