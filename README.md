@@ -26,17 +26,19 @@ straight down an axis, its two letters sit side by side. Hidden or locked cubes
 are excluded. Changing tools/modes, clearing selection, or unloading anim-ux
 removes the labels. Model data, UVs, and Undo history are not modified.
 
-### v0.8 — Cube edge midpoint pivots
+### Cube corner and edge midpoint pivots
 
 In **Edit** mode, select a cube and activate the **Pivot tool** (`P`). Small
-points appear at the cube's edge midpoints. Click a point to move the selected
-pivot to it while keeping the cube's shape in place. If a bone is selected,
-the operation moves that bone's pivot, following Blockbench's pivot selection.
-The operation supports Undo/Redo, rotated parent bones, and rescaled cubes.
+points appear at the cube's 8 corners and 12 edge midpoints. Click a point to
+move the selected pivot to it while keeping the cube's shape in place. If a
+bone is selected, the operation moves that bone's pivot, following Blockbench's
+pivot selection. The operation supports Undo/Redo, rotated parent bones, and
+rescaled cubes.
 
-A flat cube shows its four perimeter midpoints. Inflate and stretch are included
-in the target positions; Blockbench's artificial render thickness for flat
-cubes is excluded. Points disappear when changing tools or unloading anim-ux.
+A flat cube shows its four corners and four perimeter midpoints. Inflate and
+stretch are included in the point positions; Blockbench's artificial render
+thickness for flat cubes is excluded. Points disappear when changing tools or
+unloading anim-ux.
 The native vertex snap tool (`X`) keeps its existing points and behavior.
 If preserving the shape would exceed the format's coordinate limits (for
 example, a Java block cube at the boundary), the operation shows a message and

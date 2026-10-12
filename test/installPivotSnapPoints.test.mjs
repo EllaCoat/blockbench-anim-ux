@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { installPivotEdgeMidpoints } from '../dist-test/installPivotEdgeMidpoints.mjs'
+import { installPivotSnapPoints } from '../dist-test/installPivotSnapPoints.mjs'
 
 class Events {
 	listeners = new Map()
@@ -54,18 +54,20 @@ test('markers refresh with geometry, route only their own hits, and restore life
 	const { cube, mesh, tool, original, blockbench, controller, Preview, nativeRaycast } = setup()
 	const previous = { name: 'prior marker owner' }
 	mesh.vertex_points = previous
-	const cleanup = installPivotEdgeMidpoints()
+	const cleanup = installPivotSnapPoints()
 	const points = mesh.vertex_points
-	assert.equal(points.vertices.length, 12)
+	assert.equal(points.vertices.length, 20)
+	assert.deepEqual(points.vertices.slice(0, 8).map(String).sort(),
+		['0,0,0', '0,0,6', '0,4,0', '0,4,6', '2,0,0', '2,0,6', '2,4,0', '2,4,6'])
 	assert.equal(points.no_export, true)
 	const preview = new Preview()
 	preview.hit = { type: 'vertex', element: cube, intersect: { object: points } }
-	assert.equal(preview.raycast({}).type, 'animux_pivot_midpoint')
+	assert.equal(preview.raycast({}).type, 'animux_pivot_point')
 	preview.hit = { type: 'vertex', element: cube, intersect: { object: previous } }
 	assert.equal(preview.raycast({}).type, 'vertex')
 	cube.to[2] = cube.from[2]
 	controller.emit('update_geometry', { element: cube })
-	assert.equal(points.vertices.length, 4)
+	assert.equal(points.vertices.length, 8)
 	cleanup()
 	assert.equal(mesh.vertex_points, previous)
 	assert.ok(points.geometry.disposed && points.material.disposed)
@@ -79,11 +81,11 @@ test('markers refresh with geometry, route only their own hits, and restore life
 
 test('project closure clears points and chained callbacks cannot revive an unloaded plugin', () => {
 	const { mesh, tool, blockbench } = setup()
-	const cleanup = installPivotEdgeMidpoints()
+	const cleanup = installPivotSnapPoints()
 	blockbench.emit('close_project')
 	assert.equal(mesh.vertex_points, undefined)
 	blockbench.emit('select_project')
-	assert.equal(mesh.vertex_points.vertices.length, 12)
+	assert.equal(mesh.vertex_points.vertices.length, 20)
 	const installedSelect = tool.onSelect
 	const laterPluginSelect = (...args) => installedSelect(...args)
 	tool.onSelect = laterPluginSelect
@@ -93,14 +95,14 @@ test('project closure clears points and chained callbacks cannot revive an unloa
 	assert.equal(mesh.vertex_points, undefined)
 })
 
-test('hover reveals midpoint candidates through geometry and reuses their color buffer', () => {
+test('hover reveals point candidates through geometry and reuses their color buffer', () => {
 	const {cube,mesh} = setup()
-	const cleanup = installPivotEdgeMidpoints()
+	const cleanup = installPivotSnapPoints()
 	try {
 		const points = mesh.vertex_points
 		const colors = points.geometry.attributes.color
 		assert.equal(points.material.depthTest,true)
-		Canvas.raycast = () => ({type:'animux_pivot_midpoint',element:cube,vertex_index:0,intersect:{object:points}})
+		Canvas.raycast = () => ({type:'animux_pivot_point',element:cube,vertex_index:0,intersect:{object:points}})
 		Interface.preview.dispatchEvent(new Event('mousemove'))
 		assert.equal(points.material.depthTest,false)
 		assert.equal(points.geometry.attributes.color,colors)
@@ -134,9 +136,9 @@ test('bone pivot edits include nested bones in the Undo snapshot', () => {
 		Undo: { initEdit: aspects => { saved = aspects }, finishEdit() {} },
 	})
 	Canvas.updateView = () => {}
-	const cleanup = installPivotEdgeMidpoints()
+	const cleanup = installPivotSnapPoints()
 	try {
-		tool.onCanvasClick({ type: 'animux_pivot_midpoint', element: cube, vertex: [1, 2, 3] })
+		tool.onCanvasClick({ type: 'animux_pivot_point', element: cube, vertex: [1, 2, 3] })
 		assert.deepEqual(saved.groups, [parent, nested])
 		assert.deepEqual(saved.elements, [cube])
 	} finally { cleanup() }
@@ -173,9 +175,9 @@ function setupRotatedCube() {
 
 test('rescaled pivot compensation includes inverse rotation and scale', () => {
 	const {cube,tool} = setupRotatedCube()
-	const cleanup = installPivotEdgeMidpoints()
+	const cleanup = installPivotSnapPoints()
 	try {
-		tool.onCanvasClick({ type: 'animux_pivot_midpoint', element: cube, vertex: [1, 2, 3] })
+		tool.onCanvasClick({ type: 'animux_pivot_point', element: cube, vertex: [1, 2, 3] })
 		assert.deepEqual(cube.from, [0, 3, 0])
 		assert.deepEqual(cube.to, [2, 7, 6])
 		assert.deepEqual(cube.origin, [1, 2, 3])
@@ -191,9 +193,9 @@ test('a coordinate limit violation aborts every target before starting Undo', ()
 	let message
 	Blockbench.showQuickMessage = text => { message = text }
 	Undo.initEdit = () => assert.fail('Undo must not start for an invalid operation')
-	const cleanup = installPivotEdgeMidpoints()
+	const cleanup = installPivotSnapPoints()
 	try {
-		tool.onCanvasClick({type:'animux_pivot_midpoint',element:cube,vertex:[1,2,3]})
+		tool.onCanvasClick({type:'animux_pivot_point',element:cube,vertex:[1,2,3]})
 		for (const target of [cube,other]) {
 			assert.deepEqual(target.from,[0,0,0])
 			assert.deepEqual(target.to,[2,4,6])

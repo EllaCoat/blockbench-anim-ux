@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { cubeEdgeMidpoints } from '../dist-test/cubeEdgeMidpoints.mjs'
+import { cubeCorners, cubeEdgeMidpoints, cubeSnapBounds } from '../dist-test/cubeSnapPoints.mjs'
 
 function box(min, max) {
 	return new Float32Array([min[0], max[0]].flatMap(x =>
@@ -32,6 +32,31 @@ test('line cubes expose one midpoint and collapsed cubes expose no edges', () =>
 	assert.deepEqual(cubeEdgeMidpoints(box([3, 2, -5], [3, 12, -5])), [[3, 7, -5]])
 	assert.deepEqual(cubeEdgeMidpoints(box([3, 2, -5], [3, 2, -5])), [])
 	assert.deepEqual(cubeEdgeMidpoints([]), [])
+})
+
+test('cuboid corners are its 8 distinct bound combinations', () => {
+	const points = cubeCorners(box([2, -4, 6], [8, 10, 20]))
+	assert.equal(points.length, 8)
+	assert.equal(new Set(points.map(p => p.join(','))).size, 8)
+	assert.ok(points.every(p => p.every((value, axis) => [[2, 8], [-4, 10], [6, 20]][axis].includes(value))))
+})
+
+test('collapsed axes merge corners instead of duplicating them', () => {
+	assert.equal(cubeCorners(box([-3, 2, 5], [7, 2, 21])).length, 4)
+	assert.deepEqual(cubeCorners(box([3, 2, -5], [3, 12, -5])), [[3, 2, -5], [3, 12, -5]])
+	assert.deepEqual(cubeCorners(box([3, 2, -5], [3, 2, -5])), [[3, 2, -5]])
+	assert.deepEqual(cubeCorners([]), [])
+})
+
+test('snap bounds are origin-relative, inflated, and keep collapsed axes flat', () => {
+	globalThis.adjustFromAndToForInflateAndStretch = (from, to) => {
+		for (let axis = 0; axis < 3; axis++) { from[axis] -= 0.5; to[axis] += 0.5 }
+	}
+	const cube = { from: [1, 2, 3], to: [4, 2, 9], origin: [1, 1, 1] }
+	assert.deepEqual([...cubeSnapBounds(cube)], [-0.5, 0.5, 1.5, 3.5, 1.5, 8.5])
+	assert.deepEqual(cube.from, [1, 2, 3])
+	globalThis.adjustFromAndToForInflateAndStretch = () => {}
+	assert.deepEqual([...cubeSnapBounds({ from: [0, 5, 0], to: [2, 5, 2], origin: [0, 0, 0] })], [0, 5, 0, 2, 5, 2])
 })
 
 test('midpoint coordinates match the Float32 geometry used for rendering', () => {
