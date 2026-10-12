@@ -8,6 +8,7 @@ import { installBreadcrumbs } from './breadcrumb'
 import { installKeyframeJump } from './keyframeJump'
 import { installExplicitTexelLayout } from './installExplicitTexelLayout'
 import { installPivotSnapPoints } from './installPivotSnapPoints'
+import { installVertexSnapMidpoints } from './installVertexSnapMidpoints'
 import { installCubeFaceDirections } from './installCubeFaceDirections'
 import { installOnionSkin } from './onionSkin'
 import { installTimelineWindow, timelineWindowService } from './timelineWindow'
@@ -58,7 +59,7 @@ Plugin.register(PLUGIN_ID, {
 	title: 'Animation UX',
 	author: 'EllaCoat',
 	description:
-		'Animator workflow, detachable Timeline, cube face directions, cube vertex and edge midpoint pivots, explicit-texel UV layout, keyframe navigation, A-B loop, and onion skin.',
+		'Animator workflow, detachable Timeline, cube face directions, cube vertex and edge midpoint snapping, explicit-texel UV layout, keyframe navigation, A-B loop, and onion skin.',
 	icon: 'search',
 	variant: 'desktop',
 	version: PLUGIN_VERSION,
@@ -74,6 +75,7 @@ Plugin.register(PLUGIN_ID, {
 			installed.push(installTimelineWindow())
 			installed.push(installExplicitTexelLayout())
 			installed.push(installPivotSnapPoints())
+			installed.push(installVertexSnapMidpoints())
 			installed.push(installCubeFaceDirections())
 			cleanups = installed
 		} catch (error) {

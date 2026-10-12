@@ -26,7 +26,15 @@ straight down an axis, its two letters sit side by side. Hidden or locked cubes
 are excluded. Changing tools/modes, clearing selection, or unloading anim-ux
 removes the labels. Model data, UVs, and Undo history are not modified.
 
-### Cube corner and edge midpoint pivots
+### Cube corner and edge midpoint snapping
+
+In **Edit** mode, the **Vertex Snap tool** (`X`) also shows the 12 edge
+midpoints of each selected cube, in addition to Blockbench's corner and pivot
+points. A snap can start or end on a midpoint, so midpoint → corner,
+corner → midpoint, and midpoint → midpoint all work. In Scale mode, starting
+from a midpoint moves the two faces that meet at that edge and keeps the edge's
+length; starting from a corner behaves as before. Meshes and other element
+types keep Blockbench's own points.
 
 In **Edit** mode, select a cube and activate the **Pivot tool** (`P`). Small
 points appear at the cube's 8 corners and 12 edge midpoints. Click a point to
@@ -39,7 +47,6 @@ A flat cube shows its four corners and four perimeter midpoints. Inflate and
 stretch are included in the point positions; Blockbench's artificial render
 thickness for flat cubes is excluded. Points disappear when changing tools or
 unloading anim-ux.
-The native vertex snap tool (`X`) keeps its existing points and behavior.
 If preserving the shape would exceed the format's coordinate limits (for
 example, a Java block cube at the boundary), the operation shows a message and
 leaves every selected pivot unchanged. The existing size-limit setting is honored.
