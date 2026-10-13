@@ -4,6 +4,8 @@
 // 現在の playhead 時刻より「次 / 前」 の最初の keyframe を見つけて Timeline.setTime() で移動する。
 // keybind は Shift + → / Shift + ← (= 単体の矢印キーは BB 標準で frame 移動等に使用)。
 
+import { inRigelProject } from './rigelProject'
+
 declare const Action: new (id: string, opts: Record<string, unknown>) => { delete(): void }
 declare const Keybind: new (opts: Record<string, unknown>) => unknown
 declare const Timeline:
@@ -65,6 +67,7 @@ function condition(): boolean {
 	const prop = typeof Prop !== 'undefined' ? Prop : undefined
 	if (!modes?.animate) return false
 	if (!anim?.selected) return false
+	if (inRigelProject()) return false
 	// timeline panel が active なときに限り発火 (= 既存 BB shortcut との衝突回避)
 	if (prop?.active_panel !== 'timeline') return false
 	return true

@@ -28,6 +28,7 @@
 //       * matrixAutoUpdate=false + 手動 updateMatrix() で内部 matrix 計算も最小化
 
 import { filterState } from './animatorPanel'
+import { inRigelProject } from './rigelProject'
 
 declare const Canvas:
 	| { scene?: { add(o: unknown): void; remove(o: unknown): void; updateMatrixWorld?(force?: boolean): void } }
@@ -295,7 +296,7 @@ function rebuildGhosts(): void {
 	if (busy) return
 	// OFF / 編集モード外 / Animation 未選択 のいずれかなら、 既存 ghost を消してから抜ける。
 	// (= 早期 return だけだと前回 ghost が scene に残ってメモリも保持されたままになる)
-	if (!filterState.onionSkin || !Modes?.animate || !Animation?.selected) {
+	if (!filterState.onionSkin || inRigelProject() || !Modes?.animate || !Animation?.selected) {
 		disposeAllGhosts()
 		lastSrcSignature = undefined
 		return
@@ -449,7 +450,7 @@ export function installOnionSkin(): () => void {
 			name: 'Anim UX: Onion Skin Range...',
 			icon: 'layers',
 			category: 'animation',
-			condition: { modes: ['animate'] },
+			condition: { modes: ['animate'], method: () => !inRigelProject() },
 			click: openOnionSkinRangeDialog,
 		})
 		const animationMenu = (typeof MenuBar !== 'undefined' ? MenuBar : undefined)?.menus?.animation

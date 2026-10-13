@@ -14,6 +14,7 @@
 //   - body 直下に置けば panel 階層と無関係、 viewport 基準で常に最前面に出せる
 
 import { findAnimatorList, registerRefreshCallback } from './animatorPanel'
+import { inRigelProject } from './rigelProject'
 import { addTimelineDocumentListener, getTimelineDocuments } from './timelineWindow'
 
 type OutlinerLike = { name?: string; parent?: unknown }
@@ -49,6 +50,7 @@ function buildBreadcrumb(uuid: string): string | undefined {
 }
 
 function applyBreadcrumbs(): void {
+	if (inRigelProject()) return clearAllBreadcrumbs()
 	const list = findAnimatorList()
 	if (!list) return
 	const rows = list.querySelectorAll<HTMLElement>('li.animator')

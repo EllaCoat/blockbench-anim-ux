@@ -20,6 +20,7 @@
 //     left = head_width + time * size + 8 (= BB の keyframe 配置式と完全一致、 timeline.js:1775 参照)
 
 import { filterState, registerRefreshCallback, registerToggleEffect, syncToggleVisuals } from './animatorPanel'
+import { inRigelProject } from './rigelProject'
 import { findTimelineElementById, queryTimelineDocuments } from './timelineWindow'
 
 declare const Timeline:
@@ -67,7 +68,7 @@ const MARKER_CSS = `
 // BB 正式仕様の condition object 形式 (= `Animate` モード時のみ発火)。
 // v0.2 初版は function 渡し + Prop.active_panel === 'timeline' 判定だったが、
 // 後者は再生中等で外れる可能性 + 実機検証で shortcut 反応せず、 modes 制約のみに簡素化。
-const ACTION_CONDITION = { modes: ['animate'] }
+const ACTION_CONDITION = { modes: ['animate'], method: () => !inRigelProject() }
 
 // filter bar 右端の status span (= "A:0f B:20f") を現状で書き換える。
 // shortcut 経由で値が変わった瞬間に呼んで即時反映 + refresh callback でも呼んで
@@ -101,8 +102,10 @@ function tick(): void {
 	if (timeline) {
 		const start = loopStart
 		const end = loopEnd
+		// The loop may have been turned on in another project; switching tabs to a Rigel project leaves it running.
 		if (
 			filterState.abLoop &&
+			!inRigelProject() &&
 			timeline.playing &&
 			start !== undefined &&
 			end !== undefined &&
@@ -183,8 +186,9 @@ function updateMarkers(): void {
 	if (!markerA && !markerB) return
 	const size = getTimelineSize()
 	const headWidth = getTimelineHeadWidth()
+	const hidden = inRigelProject()
 	if (markerA) {
-		if (loopStart === undefined) {
+		if (loopStart === undefined || hidden) {
 			markerA.style.display = 'none'
 		} else {
 			markerA.style.display = 'block'
@@ -192,7 +196,7 @@ function updateMarkers(): void {
 		}
 	}
 	if (markerB) {
-		if (loopEnd === undefined) {
+		if (loopEnd === undefined || hidden) {
 			markerB.style.display = 'none'
 		} else {
 			markerB.style.display = 'block'

@@ -158,6 +158,10 @@ temporary directory for inspection.
 
 - Designed for general Blockbench projects. No project-format gate, so it activates on any
   project that has an animator panel.
+- In [rigel-anim](https://github.com/EllaCoat/rigel-anim) projects, the animator filter bar,
+  breadcrumbs, keyframe jump, A-B loop, and Onion Skin stay out of the way: rigel-anim
+  provides its own versions that cover its variant track and tick timing. Pop-out and the
+  modeling tools keep working there.
 - Tested primarily with [AnimatedJava](https://animated-java.dev/) workflows. AJ extended
   animator types (`NullObject`, `Locator`, `VanillaItemDisplay`) are treated as standard
   `BoneAnimator` subclasses and supported transparently.
