@@ -1,4 +1,5 @@
 import { forceRefreshOnionSkin } from './onionSkin'
+import { inRigelProject } from './rigelProject'
 import {
 	addTimelineDocumentListener,
 	getTimelineDocuments,
@@ -22,6 +23,9 @@ declare const Timeline:
 declare const Blockbench:
 	| { on(event: string, callback: () => void): void; removeListener(event: string, callback: () => void): void }
 	| undefined
+
+// Marks the rows this plugin hid, so that in a Rigel project it gives back only those and leaves rigel-anim's alone.
+const HIDDEN_ATTR = 'data-anim-ux-hidden'
 
 export interface FilterState {
 	query: string
@@ -206,8 +210,9 @@ function findBarInsertionPoint(): { container: HTMLElement; before: Element } | 
 function ensureBarInPlace(): void {
 	const insertionPoint = findBarInsertionPoint()
 	if (!insertionPoint) return
-	if (installedBar && installedBar.parentElement === insertionPoint.container && installedBar.nextSibling === insertionPoint.before) return
 	if (!installedBar) installedBar = buildBar(insertionPoint.container.ownerDocument)
+	installedBar.style.display = inRigelProject() ? 'none' : ''
+	if (installedBar.parentElement === insertionPoint.container && installedBar.nextSibling === insertionPoint.before) return
 	insertionPoint.container.insertBefore(installedBar, insertionPoint.before)
 }
 
@@ -219,9 +224,24 @@ function selectedNodeUuids(): Set<string> {
 	return selected
 }
 
+// Blockbench reuses the row elements for the next project, where rigel-anim may hide rows of its own before this
+// plugin refreshes; so leaving a project gives the rows back at once, not on the next refresh.
+function releaseRows(): void {
+	for (const row of findAnimatorList()?.querySelectorAll<HTMLElement>(`li.animator[${HIDDEN_ATTR}]`) ?? []) {
+		row.style.display = ''
+		row.removeAttribute(HIDDEN_ATTR)
+	}
+}
+
+function onConvertFormat(): void {
+	if (inRigelProject()) releaseRows()
+	scheduleRefresh()
+}
+
 export function applyFilter(): void {
 	const list = findAnimatorList()
 	if (!list) return
+	if (inRigelProject()) return releaseRows()
 	const query = filterState.query.trim().toLowerCase()
 	const selected = filterState.onlySelected ? selectedNodeUuids() : undefined
 	let keyframes: Map<string, boolean> | undefined
@@ -236,6 +256,7 @@ export function applyFilter(): void {
 		const uuid = row.getAttribute('uuid') ?? ''
 		const visible = (!query || name.includes(query)) && (!keyframes || keyframes.get(uuid) === true) && (!selected || selected.has(uuid))
 		row.style.display = visible ? '' : 'none'
+		row.toggleAttribute(HIDDEN_ATTR, !visible)
 	}
 }
 
@@ -269,15 +290,21 @@ function installPanelUI(): () => void {
 		observer = new MutationObserver(scheduleRefresh)
 		observer.observe(node, { childList: true, subtree: true })
 	}
+	// Whether the bar steps aside depends on the project's format.
+	Blockbench?.on('select_project', scheduleRefresh)
+	Blockbench?.on('unselect_project', releaseRows)
+	Blockbench?.on('convert_format', onConvertFormat)
 	return () => {
+		Blockbench?.removeListener('select_project', scheduleRefresh)
+		Blockbench?.removeListener('unselect_project', releaseRows)
+		Blockbench?.removeListener('convert_format', onConvertFormat)
 		observer?.disconnect()
 		observer = undefined
 		if (pendingRefreshHandle !== undefined) {
 			cancelAnimationFrame(pendingRefreshHandle)
 			pendingRefreshHandle = undefined
 		}
-		const list = findAnimatorList()
-		for (const row of list?.querySelectorAll<HTMLElement>('li.animator') ?? []) row.style.display = ''
+		releaseRows()
 		Object.assign(filterState, FILTER_DEFAULTS)
 		installedBar?.remove()
 		installedBar = undefined
